@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3 has no success colour; these greens sit at the same tone as colorError in each theme -->
+    <color name="status_ok">#FF1E7B34</color>
+</resources>
