@@ -4,12 +4,14 @@ import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Binder
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import java.io.FileNotFoundException
 
 // What the module asks of AA Mods from inside Android Auto, and only Android Auto may: the phone screen's link
-// (see PhoneScreen), stopping an app closed from the recents screen, and reporting it runs there (WelcomeActivity)
+// (see PhoneScreen), the settings to run with (Prefs, the one settings channel that needs nothing from the
+// framework), stopping an app closed from the recents screen, and reporting it runs there (WelcomeActivity)
 class AndroidAutoBridge : ContentProvider() {
     // Returned as a file, the link is closed here once sent, so either side closing its end ends the other's reads
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
@@ -29,14 +31,22 @@ class AndroidAutoBridge : ContentProvider() {
                 .putLong(AppState.LOADED_AT, System.currentTimeMillis())
                 .commit()
         }
+        if (method == PREFS) return Prefs.bundle(context!!.getSharedPreferences(Prefs.FILE, Context.MODE_PRIVATE))
         if (method == STOP_APP && arg != null && arg.matches(PACKAGE_NAME) && arg != Entry.GEARHEAD && arg != BuildConfig.APPLICATION_ID) {
             Thread { runAsRoot("am stop-app $arg || am kill $arg") }.start()
         }
         return null
     }
 
+    // callingPackage is what the system derives for the caller. The hooks usually call through Android
+    // Auto's application context, but early ones call through the system context they make before any
+    // application exists, which names the caller "android" while the uid is still Android Auto's. The
+    // uid answers for that case, and no other app's uid does
     private fun checkCaller() {
-        if (callingPackage != Entry.GEARHEAD) throw SecurityException("Only Android Auto may use AA Mods' bridge")
+        if (callingPackage == Entry.GEARHEAD ||
+            context?.packageManager?.getPackagesForUid(Binder.getCallingUid())?.contains(Entry.GEARHEAD) == true
+        ) return
+        throw SecurityException("Only Android Auto may use AA Mods' bridge")
     }
 
     override fun onCreate() = true
@@ -50,6 +60,7 @@ class AndroidAutoBridge : ContentProvider() {
         val URI: Uri = Uri.parse("content://uk.noammm.aamods.bridge")
         const val STOP_APP = "stop_app"
         const val LOADED = "loaded"
+        const val PREFS = "prefs"
         private val PACKAGE_NAME = Regex("[A-Za-z0-9_.]+")
     }
 }

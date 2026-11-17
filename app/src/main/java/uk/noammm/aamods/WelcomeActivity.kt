@@ -21,13 +21,13 @@ import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.util.concurrent.Executors
 
-// The first screen: checks the three things AA Mods needs (root, the module enabled in Vector, and the module
-// running inside Android Auto) and helps with each one that's missing
+// The first screen: checks the three things AA Mods needs (root, the module enabled in the Xposed framework,
+// and the module running inside Android Auto) and helps with each one that's missing
 class WelcomeActivity : AppCompatActivity() {
     private val background = Executors.newSingleThreadExecutor()
     private lateinit var state: SharedPreferences
     private lateinit var root: View
-    private lateinit var vector: View
+    private lateinit var xposed: View
     private lateinit var androidAuto: View
     private var rooted = false
 
@@ -48,7 +48,10 @@ class WelcomeActivity : AppCompatActivity() {
         findViewById<LinearLayout>(R.id.checks).addView(section)
         val rows = section.findViewById<LinearLayout>(R.id.rows)
         root = rows.check(R.drawable.ic_terminal, R.string.check_root, R.string.check_root_summary) { checkRoot() }
-        vector = rows.check(R.drawable.ic_extension, R.string.check_vector, R.string.check_vector_summary) { explainVector() }
+        xposed = rows.check(R.drawable.ic_extension, R.string.check_xposed, R.string.check_xposed_summary) { explainFramework() }
+        // check_xposed names the framework, so it's filled in here rather than straight from the resource,
+        // and filled in again once root is granted and the deeper check can read the Magisk module directories
+        xposed.findViewById<TextView>(R.id.title).text = getString(R.string.check_xposed, Framework.name(this))
         androidAuto = rows.check(R.drawable.ic_directions_car, R.string.check_android_auto, R.string.check_android_auto_summary) {
             if (rooted) checkAndroidAuto(restart = true) else Toast.makeText(this, R.string.restart_aa_failed, Toast.LENGTH_LONG).show()
         }
@@ -63,7 +66,9 @@ class WelcomeActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        status(vector, Prefs.open(this) != null, R.string.status_enabled, R.string.status_not_enabled)
+        // The framework shares the module's file where it injects the module into its own app (Prefs.open,
+        // Vector's way); elsewhere, LSPosed for one, the report from inside Android Auto is the sign it's on
+        status(xposed, Prefs.open(this) != null || AppState.reported(this), R.string.status_enabled, R.string.status_not_enabled)
         checkAndroidAuto(restart = false)
     }
 
@@ -84,7 +89,17 @@ class WelcomeActivity : AppCompatActivity() {
             runOnUiThread {
                 rooted = ok
                 status(root, ok, R.string.status_granted, R.string.status_allow_root)
+                if (ok) refreshFramework()
             }
+        }
+    }
+
+    // Root granted: the manager may hide inside another app instead of installing, and the framework's own
+    // Magisk module directory tells them apart, so the row title can name the framework from here on
+    private fun refreshFramework() = background.execute {
+        val name = Framework.name(this@WelcomeActivity, askRoot = true)
+        runOnUiThread {
+            xposed.findViewById<TextView>(R.id.title).text = getString(R.string.check_xposed, name)
         }
     }
 
@@ -103,16 +118,12 @@ class WelcomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun loaded(): Boolean {
-        val installed = packageManager.getPackageInfo(packageName, 0).lastUpdateTime
-        return state.getString(AppState.LOADED_VERSION, null) == BuildConfig.VERSION_NAME &&
-            state.getLong(AppState.LOADED_AT, 0) > installed
-    }
+    private fun loaded() = AppState.reported(this)
 
-    private fun explainVector() {
+    private fun explainFramework() {
         MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.vector_help_title)
-            .setMessage(R.string.vector_help_message)
+            .setTitle(getString(R.string.framework_help_title, Framework.name(this)))
+            .setMessage(R.string.framework_help_message)
             .setPositiveButton(android.R.string.ok, null)
             .show()
     }

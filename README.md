@@ -18,8 +18,8 @@
   <a href="https://www.buymeacoffee.com/Noamm"><img alt="Buy Me A Coffee" src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png"></a>
 </p>
 
-AA Mods is a Vector (Xposed) module that changes how Android Auto behaves on your phone and on the car screen.
-Everything is a switch in its settings app.
+AA Mods is an Xposed module — it runs on LSPosed and on its fork Vector — that changes how Android Auto behaves
+on your phone and on the car screen. Everything is a switch in its settings app.
 
 I wanted Android Auto to do what I tell it: open on the launcher instead of starting navigation and music by
 itself, let me close apps, run on microG and stop sending Google its telemetry. It grew from there.
@@ -43,15 +43,21 @@ itself, let me close apps, run on microG and stop sending Google its telemetry. 
 
 ## Getting it
 
-You'll need a rooted phone with Vector and Android Auto 17.6. AA Mods hooks Android Auto's internal code, which
-changes with every version.
+You'll need a rooted phone with LSPosed or Vector, and Android Auto 17.6. AA Mods hooks Android Auto's internal
+code, which changes with every version.
 
 1. Grab the APK from [Releases](https://github.com/ImNoammm/aa-mods/releases) and install it.
-2. In Vector, turn on AA Mods and tick Android Auto in its scope. For the microG switch on a phone where Android
-   Auto didn't come preinstalled, tick System Framework too and reboot.
-3. Open AA Mods. The first screen checks root, Vector and Android Auto, and can restart Android Auto for you.
+2. In your Xposed manager (LSPosed or Vector), turn on AA Mods and tick Android Auto in its scope. For the microG
+   switch on a phone where Android Auto didn't come preinstalled, tick System Framework too and reboot.
+3. Open AA Mods. The first screen checks root, that AA Mods is enabled in your Xposed manager and that it's running
+   inside Android Auto, and can restart Android Auto for you.
 
 After that it checks GitHub for a new version every time you open it, and updates from inside the app.
+
+A note on the microG switch: its system-access part runs inside `system_server`, which reads the module's own
+settings file. That file is only shared with the module's own app on Vector, so with LSPosed the switch works for
+a preinstalled Android Auto and for microG itself, but the extra system access for a non-preinstalled one can't be
+turned on from here.
 
 ## Building it
 

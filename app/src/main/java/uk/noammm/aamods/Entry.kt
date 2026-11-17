@@ -8,6 +8,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.net.Uri
@@ -55,7 +56,7 @@ import java.util.function.Consumer
 
 // Class and member names are the obfuscated ones from Android Auto 17.6 and change between versions
 class Entry : IXposedHookLoadPackage {
-    private lateinit var prefs: XSharedPreferences
+    private lateinit var prefs: SharedPreferences
     private lateinit var cl: ClassLoader
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -67,7 +68,7 @@ class Entry : IXposedHookLoadPackage {
         }
         if (lpparam.packageName != GEARHEAD) return
         cl = lpparam.classLoader
-        prefs = XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE)
+        prefs = loadPrefs()
         log("loaded into ${lpparam.processName}")
 
         safely("flags") { hookFlags() }
@@ -435,7 +436,7 @@ class Entry : IXposedHookLoadPackage {
     private fun chimeraAction(intent: Intent): String? =
         intent.data?.takeIf { it.scheme == CHIMERA_SCHEME }?.schemeSpecificPart
 
-    // Phenotype and friends rebind many times per session; one line per distinct event keeps Vector's log readable
+    // Phenotype and friends rebind many times per session; one line per distinct event keeps the log readable
     private val logged = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
 
     private fun logOnce(msg: String) {
@@ -1009,6 +1010,33 @@ class Entry : IXposedHookLoadPackage {
     // AA Mods' own package, for its strings and icons inside Android Auto
     private fun moduleContext(context: Context) =
         module ?: context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY).also { module = it }
+
+    // How the settings reach the hooks. XSharedPreferences reads the module's own file, which works only
+    // where the framework injects the module into its own app and shares that file (Vector does). LSPosed
+    // injects only the apps in a module's scope and never the module itself, so its shared file stays
+    // empty; there the bridge answers, asking AA Mods' own app, which is a plain app every framework can
+    // serve. It's read once per process, like the file was: settings changes ask for an Android Auto
+    // restart either way
+    private fun loadPrefs(): SharedPreferences {
+        val shared = XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE)
+        if (shared.file.canRead()) return shared
+        return try {
+            bridgeContext()?.contentResolver?.call(AndroidAutoBridge.URI, AndroidAutoBridge.PREFS, null, null)
+                ?.let { Prefs.FromBridge(it) } ?: Prefs.empty
+        } catch (t: Throwable) {
+            log("bridge prefs failed: $t")
+            Prefs.empty
+        }
+    }
+
+    // A context for the bridge, which the hooks may need before any application exists. The system context
+    // is made early in every process, and a provider call made with it still arrives as Android Auto's
+    // (the system derives the caller from the process, not the context)
+    private fun bridgeContext(): Context? = AndroidAppHelper.currentApplication()
+        ?: runCatching {
+            val thread = XposedHelpers.callStaticMethod(XposedHelpers.findClass("android.app.ActivityThread", cl), "currentActivityThread")
+            XposedHelpers.callMethod(thread, "getSystemContext") as? Context
+        }.getOrNull()
 
     // Tells AA Mods the module runs in Android Auto, and which version, for the welcome screen's check. Only from
     // :provider, the process that check starts, once its Application exists.

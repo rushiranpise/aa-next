@@ -67,7 +67,13 @@ class SettingsActivity : AppCompatActivity() {
         content = findViewById(R.id.content)
         restart = findViewById(R.id.restart)
 
-        prefs = Prefs.open(this) ?: run {
+        // The settings live in this app's own file either way: the hooks read them through the bridge
+        // provider (Entry), so a framework that doesn't share the module's file, LSPosed for one, still
+        // gets every change after Android Auto restarts
+        prefs = getSharedPreferences(Prefs.FILE, MODE_PRIVATE)
+        // Until the module is on in the framework and has reached Android Auto: then the framework either
+        // shares the file (Prefs.open, Vector's way) or the hooks reported in (AppState.reported)
+        if (Prefs.open(this) == null && !AppState.reported(this)) {
             findViewById<View>(R.id.not_active).apply {
                 isVisible = true
                 setOnClickListener {
@@ -75,7 +81,6 @@ class SettingsActivity : AppCompatActivity() {
                     finish()
                 }
             }
-            getSharedPreferences(Prefs.FILE, MODE_PRIVATE)
         }
 
         val scroll = findViewById<NestedScrollView>(R.id.scroll)
@@ -281,7 +286,11 @@ class SettingsActivity : AppCompatActivity() {
                 locationOff -> ask(getString(R.string.microg_location_title, label), getString(R.string.microg_location_message, label), R.string.microg_location_button) {
                     open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", microG!!.packageName, null)))
                 }
-                systemAccessMissing -> ask(getString(R.string.microg_system_title), getString(R.string.microg_system_message), android.R.string.ok, null)
+                // The system access runs as hooks in system_server, which read the module's own file. Only a
+                // framework that injects the module into its own app and shares that file (Prefs.open, Vector's
+                // way) can get the switch there, so on frameworks that don't, like LSPosed, it isn't offered
+                systemAccessMissing && Prefs.open(this) != null ->
+                    ask(getString(R.string.microg_system_title), getString(R.string.microg_system_message, Framework.name(this)), android.R.string.ok, null)
             }
         }
     }

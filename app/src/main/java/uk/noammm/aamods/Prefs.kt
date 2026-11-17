@@ -3,8 +3,14 @@ package uk.noammm.aamods
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Bundle
 
-// Shared between the settings screen (writes) and the hooks inside Android Auto (reads through XSharedPreferences)
+// Shared between the settings screen (writes) and the hooks inside Android Auto (reads). The hooks read
+// the settings either from the module's own file through XSharedPreferences, which only works where the
+// framework injects the module into its own app (Vector does, and then keeps that file readable), or
+// through the module's bridge provider, which every framework can serve because the module app is a
+// plain app no framework has to touch (LSPosed injects only scoped apps, so its shared file stays empty
+// and the bridge is what carries the settings there)
 object Prefs {
     const val FILE = "settings"
 
@@ -33,8 +39,9 @@ object Prefs {
 
     fun on(prefs: SharedPreferences, key: String) = prefs.getBoolean(key, key !in OFF_BY_DEFAULT)
 
-    // World-readable is what lets the hooks inside Android Auto read these, and Vector only allows it once AA Mods is
-    // enabled there, so null means it isn't
+    // World-readable is what lets the hooks inside Android Auto read these, and Vector only allows it once
+    // AA Mods is enabled there, so null means it isn't. LSPosed never shares the file, so callers also take
+    // the report from inside Android Auto as a sign the module is on (AppState.reported)
     @SuppressLint("WorldReadableFiles")
     fun open(context: Context): SharedPreferences? = try {
         @Suppress("DEPRECATION")
@@ -42,6 +49,45 @@ object Prefs {
     } catch (_: SecurityException) {
         null
     }
+
+    // The settings as a Bundle, for the bridge to hand the hooks. Each value keeps its stored type.
+    fun bundle(prefs: SharedPreferences): Bundle {
+        val out = Bundle()
+        for ((key, value) in prefs.all) when (value) {
+            is String -> out.putString(key, value)
+            is Int -> out.putInt(key, value)
+            is Long -> out.putLong(key, value)
+            is Boolean -> out.putBoolean(key, value)
+            is Float -> out.putFloat(key, value)
+            is Set<*> -> out.putStringArrayList(key, ArrayList(value.filterIsInstance<String>()))
+        }
+        return out
+    }
+
+    // The hooks' read-only view of what the bridge served, typed like SharedPreferences so the hooks don't
+    // care which way the settings came in
+    class FromBridge(bundle: Bundle) : SharedPreferences {
+        private val stored = HashMap<String, Any?>().apply {
+            for (key in bundle.keySet()) @Suppress("DEPRECATION") { put(key, bundle.get(key)) }
+        }
+
+        override fun getAll(): Map<String, *> = stored
+        override fun getString(key: String, defValue: String?): String? = stored[key] as? String ?: defValue
+        override fun getStringSet(key: String, defValues: Set<String>?): Set<String>? =
+            (stored[key] as? List<*>)?.filterIsInstance<String>()?.toSet() ?: defValues
+        override fun getInt(key: String, defValue: Int): Int = (stored[key] as? Number)?.toInt() ?: defValue
+        override fun getLong(key: String, defValue: Long): Long = (stored[key] as? Number)?.toLong() ?: defValue
+        override fun getFloat(key: String, defValue: Float): Float = (stored[key] as? Number)?.toFloat() ?: defValue
+        override fun getBoolean(key: String, defValue: Boolean): Boolean = stored[key] as? Boolean ?: defValue
+        override fun contains(key: String) = stored.containsKey(key)
+
+        override fun edit(): SharedPreferences.Editor = throw UnsupportedOperationException("read-only")
+        override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
+        override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
+    }
+
+    // Nothing stored yet: every switch answers its default, exactly like a missing file did
+    val empty: SharedPreferences = FromBridge(Bundle())
 }
 
 // AA Mods' own state, which the hooks never read
@@ -51,4 +97,16 @@ object AppState {
     // The AA Mods version the module last reported running inside Android Auto with, and when
     const val LOADED_VERSION = "loaded_version"
     const val LOADED_AT = "loaded_at"
+
+    // Whether the hooks reported running inside Android Auto with this version since it was installed.
+    // Reaching Android Auto means the module is on in the framework and in Android Auto's scope, which
+    // is the one enabled-sign that works on every framework
+    fun reported(context: Context): Boolean {
+        val state = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        val installed = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+        }.getOrDefault(0L)
+        return state.getString(LOADED_VERSION, null) == BuildConfig.VERSION_NAME &&
+            state.getLong(LOADED_AT, 0) > installed
+    }
 }

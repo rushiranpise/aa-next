@@ -6,16 +6,16 @@
         <item>android</item>
     </string-array>
 
-    <string name="not_active">AA Mods isn’t enabled in Vector, so these settings won’t reach Android Auto. Tap here to set it up.</string>
+    <string name="not_active">AA Mods isn’t reaching Android Auto yet: it isn’t turned on in the Xposed manager, or Android Auto still needs a restart. Tap here to set it up.</string>
 
     <string name="welcome_title">Welcome to AA Mods</string>
-    <string name="welcome_text">Tweaks for Android Auto. It works from inside Android Auto as a Vector module, so check these first.</string>
+    <string name="welcome_text">Tweaks for Android Auto. It works from inside Android Auto as an Xposed module, so check these first.</string>
     <string name="welcome_checks">Setup</string>
     <string name="welcome_continue">Continue</string>
     <string name="check_root">Root access</string>
     <string name="check_root_summary">To restart Android Auto, show the car screen on this phone and close apps for real. Tap to ask again</string>
-    <string name="check_vector">Enabled in Vector</string>
-    <string name="check_vector_summary">AA Mods has to be turned on in Vector’s modules list. Tap for how</string>
+    <string name="check_xposed">Enabled in %1$s</string>
+    <string name="check_xposed_summary">AA Mods has to be turned on in the Xposed manager’s module list. Tap for how</string>
     <string name="check_android_auto">Running in Android Auto</string>
     <string name="check_android_auto_summary">Android Auto has to be in AA Mods’ scope and restarted after that. Tap to restart it and check again</string>
     <string name="status_checking">Checking…</string>
@@ -25,8 +25,8 @@
     <string name="status_not_enabled">Not enabled</string>
     <string name="status_working">Working</string>
     <string name="status_restart_aa">Not yet</string>
-    <string name="vector_help_title">Enable AA Mods in Vector</string>
-    <string name="vector_help_message">Open Vector from its notification or from its module in your root manager. Turn on AA Mods, tick Android Auto in its scope (and System Framework if Android Auto didn’t come preinstalled), then come back here.</string>
+    <string name="framework_help_title">Enable AA Mods in %1$s</string>
+    <string name="framework_help_message">Open your Xposed manager — the LSPosed or Vector app, or the notification it posts. Turn on AA Mods, tick Android Auto in its scope (and System Framework if Android Auto didn’t come preinstalled), then come back here.</string>
 
     <string name="section_driving">Driving</string>
     <string name="no_lockouts">Always parked</string>
@@ -94,7 +94,7 @@
     <string name="microg_location_message">Android Auto now gets the car’s location from %1$s. In its app info, open Permissions, then Location, and choose Allow all the time.</string>
     <string name="microg_location_button">Open app info</string>
     <string name="microg_system_title">Give Android Auto system access</string>
-    <string name="microg_system_message">Android Auto didn’t come preinstalled on this phone, so it also needs the system access a preinstalled one has. In Vector, add System Framework to AA Mods’ scope, then reboot.</string>
+    <string name="microg_system_message">Android Auto didn’t come preinstalled on this phone, so it also needs the system access a preinstalled one has. In %1$s, add System Framework to AA Mods’ scope, then reboot.</string>
     <string name="later">Later</string>
 
     <string name="section_flags">Flag overrides</string>
