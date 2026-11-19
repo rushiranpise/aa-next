@@ -16,6 +16,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Parcel
+import android.util.Log
 import android.util.TypedValue
 import android.view.KeyEvent
 import android.view.View
@@ -674,23 +675,29 @@ class Entry : IXposedHookLoadPackage {
                 if (connectionType == DEVELOPER_SERVER_CONNECTION && intent.action == USB_ACCESSORY_DETACHED) param.result = null
             }
         }
-        XposedBridge.hookMethod(base.getDeclaredMethod("onReceive", Context::class.java, Intent::class.java), ignoreUsbDetach)
-        log("USB detach ignored by ${base.name}")
+        for (method in base) XposedBridge.hookMethod(method, ignoreUsbDetach)
+        log("USB detach ignored by ${base.joinToString { it.declaringClass.name }}")
     }
 
     // The receivers for USB detach are the classes that handle its action; they all share one base,
-    // which is the class that declares onReceive (sku in 18.2, tried first)
-    private fun usbReceiverBase(): Class<*>? {
-        XposedHelpers.findClassIfExists("sku", cl)?.takeIf { isUsbReceiverBase(it) }?.let { return it }
-        val bases = dex.classes("usb.receivers") { usingEqStrings(USB_ACCESSORY_DETACHED) }
-            .mapNotNull { receiver ->
-                var at: Class<*>? = receiver
-                while (at != null && !isUsbReceiverBase(at)) at = at.superclass
-                at
-            }
-            .distinct()
-        if (bases.size != 1) log("USB detach receivers share ${bases.size} bases: $bases")
-        return bases.singleOrNull()
+    // which is the class that declares onReceive (sku in 18.2, tried first). A class that only mentions
+    // the action (xjg in 18.2.664604, a generic receiver base) is not a receiver itself, so the search
+    // starts above every match
+    private fun usbReceiverBase(): List<Method>? {
+        val named = XposedHelpers.findClassIfExists("sku", cl)?.takeIf { isUsbReceiverBase(it) }
+        if (named != null) return listOf(named.getDeclaredMethod("onReceive", Context::class.java, Intent::class.java))
+        val receivers = dex.classes("usb.receivers") { usingEqStrings(USB_ACCESSORY_DETACHED) }
+        val bases = receivers.mapNotNull { receiver ->
+            var at: Class<*>? = receiver.superclass
+            while (at != null && !isUsbReceiverBase(at)) at = at.superclass
+            at
+        }.distinct()
+        if (bases.isEmpty()) log("USB detach receivers have no shared base: $receivers")
+        // Without a base, the receivers that handle the broadcast themselves are still hookable
+        val targets = bases.ifEmpty { receivers.filter { c -> c.declaredMethods.any { it.name == "onReceive" } } }
+        if (targets.size > 1) log("USB detach receivers share ${targets.size} bases: $targets")
+        return targets.takeIf { it.isNotEmpty() }
+            ?.mapNotNull { runCatching { it.getDeclaredMethod("onReceive", Context::class.java, Intent::class.java) }.getOrNull() }
     }
 
     private fun isUsbReceiverBase(c: Class<*>): Boolean =
@@ -1202,23 +1209,47 @@ class Entry : IXposedHookLoadPackage {
     private fun loadPrefs(): SharedPreferences {
         val shared = XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE)
         if (shared.file.canRead()) return shared
+        val context = bridgeContext()
         return try {
-            bridgeContext()?.contentResolver?.call(AndroidAutoBridge.URI, AndroidAutoBridge.PREFS, null, null)
+            context?.contentResolver?.call(AndroidAutoBridge.URI, AndroidAutoBridge.PREFS, null, null)
                 ?.let { Prefs.FromBridge(it) } ?: Prefs.empty
         } catch (t: Throwable) {
-            log("bridge prefs failed: $t")
+            log("bridge prefs failed: $t (${context?.opPackageName})")
             Prefs.empty
         }
     }
 
     // A context for the bridge, which the hooks may need before any application exists. The system context
-    // is made early in every process, and a provider call made with it still arrives as Android Auto's
-    // (the system derives the caller from the process, not the context)
-    private fun bridgeContext(): Context? = AndroidAppHelper.currentApplication()
-        ?: runCatching {
+    // is made early in every process, but it calls as "android", and the provider call is refused before it
+    // arrives because "android" is not one of Android Auto's packages. A package context for Android Auto
+    // inherits that attribution, so it is replaced with Android Auto's package and this process's uid
+    private fun bridgeContext(): Context? {
+        AndroidAppHelper.currentApplication()?.let { return it }
+        return try {
             val thread = XposedHelpers.callStaticMethod(XposedHelpers.findClass("android.app.ActivityThread", cl), "currentActivityThread")
-            XposedHelpers.callMethod(thread, "getSystemContext") as? Context
-        }.getOrNull()
+            val system = XposedHelpers.callMethod(thread, "getSystemContext") as Context
+            val context = system.createPackageContext(GEARHEAD, Context.CONTEXT_IGNORE_SECURITY)
+            try {
+                // XposedHelpers.newInstance infers the parameter types from the arguments, and the
+                // attribution tag is null, so the constructor is picked by its signature instead
+                val constructor = XposedHelpers.findConstructorExact(
+                    XposedHelpers.findClass("android.content.AttributionSource", cl),
+                    Int::class.javaPrimitiveType, String::class.java, String::class.java,
+                )
+                XposedHelpers.setObjectField(
+                    context, "mAttributionSource",
+                    constructor.newInstance(android.os.Process.myUid(), GEARHEAD, null),
+                )
+            } catch (t: Throwable) {
+                log("bridge prefs: could not name the caller: $t")
+            }
+            log("bridge prefs: calling as ${context.opPackageName}")
+            context
+        } catch (t: Throwable) {
+            log("bridge prefs: no context: $t")
+            null
+        }
+    }
 
     // Tells AA Mods the module runs in Android Auto, and which version, for the welcome screen's check. Only from
     // :provider, the process that check starts, once its Application exists.
@@ -1478,7 +1509,7 @@ class Entry : IXposedHookLoadPackage {
         try {
             block()
         } catch (t: Throwable) {
-            log("$what hook failed: $t")
+            log("$what hook failed: $t\n${Log.getStackTraceString(t)}")
         }
     }
 

@@ -1,5 +1,6 @@
 package uk.noammm.aamods
 
+import android.content.Context
 import android.os.Build
 import android.os.SystemClock
 import de.robv.android.xposed.XposedBridge
@@ -32,7 +33,8 @@ class Dex(private val apk: File?, private val cache: File?, private val cl: Clas
     private val answers = HashMap<String, String>()
     private var read = false
     private var bridge: DexKitBridge? = null
-    private var nativeTried = false
+    private var nativeLoaded = false
+    private var nativeError: Throwable? = null
 
     // One cache file per Android Auto build: an update replaces the APK, which changes both length and
     // timestamp, so the old answers are never even read
@@ -168,12 +170,22 @@ class Dex(private val apk: File?, private val cache: File?, private val cl: Clas
     // DexKit has no JNI_OnLoad of its own: whoever uses it loads libdexkit.so. Xposed adds the module's
     // lib directory to the search path only when the installer extracted it, so fall back to copying
     // the library out of the module's own APK next to Android Auto's cache and loading it from there.
+    private fun loadNative() {
+        if (nativeLoaded) return
+        nativeError?.let { throw IllegalStateException("libdexkit.so could not be loaded: $it", it) }
+        try {
+            loadNativeLibrary()
+            nativeLoaded = true
+        } catch (t: Throwable) {
+            nativeError = t
+            throw t
+        }
+    }
+
     // The name includes the module's size and timestamp, so an updated module never loads an old copy,
     // and each process copies to a temporary name first: another process may be copying the same file
     // at the same time, and a rename is atomic, so every process loads a complete one
-    private fun loadNative() {
-        if (nativeTried) return
-        nativeTried = true
+    private fun loadNativeLibrary() {
         try {
             System.loadLibrary("dexkit")
             return
@@ -182,6 +194,14 @@ class Dex(private val apk: File?, private val cache: File?, private val cl: Clas
         }
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: error("no supported ABI")
         val module = moduleApk() ?: error("the module's APK path is unknown")
+        log("dex: module at $module")
+        // The installer extracts the module's native libraries next to its APK (extractNativeLibs is
+        // on for exactly this), and that copy is in a read-only directory, so prefer it
+        extractedLibrary(module, abi)?.let { extracted ->
+            System.load(extracted.path)
+            log("dex: loaded ${extracted.path}")
+            return
+        }
         val dir = cache ?: File(System.getProperty("java.io.tmpdir") ?: "/data/local/tmp")
         dir.mkdirs()
         val stamp = File(module).let { "${it.length()}-${it.lastModified()}" }
@@ -205,12 +225,56 @@ class Dex(private val apk: File?, private val cache: File?, private val cl: Clas
         log("dex: loaded ${library.path}")
     }
 
-    // The module's own APK, which Xposed loaded this class from
-    private fun moduleApk(): String? = try {
-        Entry::class.java.protectionDomain?.codeSource?.location?.toURI()?.let { File(it).path }
-    } catch (_: Throwable) {
-        null
+    // The installer extracts the module's libraries to lib/<directory>/ next to the APK, but the
+    // directory is not always named like the ABI in the APK: this device has lib/arm64 for the
+    // arm64-v8a entry, so look for the library file instead of guessing the directory
+    private fun extractedLibrary(module: String, abi: String): File? {
+        val root = File(File(module).parentFile, "lib")
+        val dirs = root.listFiles()?.filter { it.isDirectory } ?: return null
+        val ordered = dirs.sortedBy { if (it.name == abi) 0 else if (abi.startsWith(it.name)) 1 else 2 }
+        return ordered.map { File(it, "libdexkit.so") }.firstOrNull { it.exists() }
+    }
+
+    // The module's own APK. The package manager knows where it is installed, and the system context
+    // exists before Android Auto's own context does (its package manager also is not filtered by
+    // package visibility). The class loader and protection domain are fallbacks for frameworks where
+    // ActivityThread differs
+    private fun moduleApk(): String? {
+        try {
+            val thread = XposedHelpers.callStaticMethod(XposedHelpers.findClass("android.app.ActivityThread", cl), "currentActivityThread")
+            val context = XposedHelpers.callMethod(thread, "getSystemContext") as? Context
+            context?.packageManager?.getApplicationInfo(BuildConfig.APPLICATION_ID, 0)?.sourceDir?.let { return it }
+        } catch (_: Throwable) {
+            // Fall back to the class loader
+        }
+        var loader: ClassLoader? = Entry::class.java.classLoader
+        while (loader != null) {
+            try {
+                val pathList = XposedHelpers.getObjectField(loader, "pathList")
+                for (field in arrayOf("dexElements", "pathElements")) {
+                    val elements = runCatching { XposedHelpers.getObjectField(pathList, field) as? Array<*> }.getOrNull() ?: continue
+                    for (element in elements) {
+                        val path = runCatching { XposedHelpers.getObjectField(element, "path") as? String }.getOrNull() ?: continue
+                        if (path.endsWith(".apk") && !path.contains(GEARHEAD)) return path
+                    }
+                }
+            } catch (_: Throwable) {
+                // Next loader
+            }
+            APK_IN_CLASS_LOADER.find(loader.toString())?.groupValues?.get(1)?.let { if (!it.contains(GEARHEAD)) return it }
+            loader = loader.parent
+        }
+        return try {
+            Entry::class.java.protectionDomain?.codeSource?.location?.toURI()?.let { File(it).path }
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     private fun log(msg: String) = XposedBridge.log("AAMods: $msg")
+
+    companion object {
+        private const val GEARHEAD = "com.google.android.projection.gearhead"
+        private val APK_IN_CLASS_LOADER = Regex("\"([^\"]+\\.apk)\"")
+    }
 }
