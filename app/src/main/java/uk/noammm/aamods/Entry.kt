@@ -54,7 +54,7 @@ import java.lang.reflect.Modifier
 import java.util.concurrent.Executor
 import java.util.function.Consumer
 
-// Class and member names are the obfuscated ones from Android Auto 17.6 and change between versions
+// Class and member names are the obfuscated ones from Android Auto 18.2 and change between versions
 class Entry : IXposedHookLoadPackage {
     private lateinit var prefs: SharedPreferences
     private lateinit var cl: ClassLoader
@@ -74,6 +74,8 @@ class Entry : IXposedHookLoadPackage {
         safely("flags") { hookFlags() }
         safely("phone screen") { hookPhoneScreen() }
         if (lpparam.processName.endsWith(":provider")) safely("report") { reportLoaded() }
+        // Pending 18.2 remap (17.6 names are different classes in 18.2): phone app rail, phone app size.
+        // Re-enabled as each cluster is mapped and verified.
         safely("phone screen on USB changes") { keepPhoneScreenOnUsbChanges() }
         if (Prefs.on(prefs, Prefs.NO_LOCKOUTS)) safely("lockouts") { hookDrivingStatus() }
         if (Prefs.on(prefs, Prefs.NO_FORCED_APPS)) safely("forced apps") { hookForcedApps() }
@@ -82,10 +84,10 @@ class Entry : IXposedHookLoadPackage {
         if (Prefs.on(prefs, Prefs.MICROG)) safely("microG") { hookMicroG() }
         if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) {
             safely("launcher tabs") { hookLauncherTabs() }
-            safely("phone app rail") { keepRailBesidePhoneApps() }
+            // safely("phone app rail") { keepRailBesidePhoneApps() }
         }
-        val scale = prefs.getInt(Prefs.PHONE_APP_SCALE, 100)
-        if (scale != 100) safely("phone app size") { hookPhoneAppDensity(scale) }
+        // val scale = prefs.getInt(Prefs.PHONE_APP_SCALE, 100)
+        // if (scale != 100) safely("phone app size") { hookPhoneAppDensity(scale) }
         val pinned = prefs.getString(Prefs.PINNED_APPS, "").orEmpty().split(',').filter { it.isNotEmpty() }
         if (pinned.isNotEmpty()) safely("pinned apps") { hookPinnedApps(pinned) }
         if (onlyOpenApps()) safely("open apps") {
@@ -102,13 +104,13 @@ class Entry : IXposedHookLoadPackage {
         if (Prefs.on(prefs, Prefs.MUTE_NOTIFICATIONS)) safely("notifications") { hookNotifications() }
     }
 
-    // Every Phenotype flag is read through wck.fE() / wck.fF(Context); field b holds the flag name
+    // Every Phenotype flag is read through xfj.fB() / xfj.fC(Context); field b holds the flag name
     private fun hookFlags() {
         val overrides = flagOverrides()
         val allowAll = if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) setOf(PHONE_APPS_FILTER) else emptySet()
         if (overrides.isEmpty() && allowAll.isEmpty()) return
-        // Package filter proto: b is the has-bits, c the mode
-        val allowAllFilter = if (allowAll.isEmpty()) null else XposedHelpers.newInstance(XposedHelpers.findClass("absk", cl)).also {
+        // Package filter proto: b is the has-bits, c the mode (the consumer checks c against the allow-all mode)
+        val allowAllFilter = if (allowAll.isEmpty()) null else XposedHelpers.newInstance(XposedHelpers.findClass("acrw", cl)).also {
             XposedHelpers.setIntField(it, "b", 1)
             XposedHelpers.setIntField(it, "c", FILTER_ALLOW_ALL)
         }
@@ -123,9 +125,9 @@ class Entry : IXposedHookLoadPackage {
                 convert(param.result, value)?.let { param.result = it }
             }
         }
-        val wck = XposedHelpers.findClass("wck", cl)
-        XposedBridge.hookAllMethods(wck, "fE", hook)
-        XposedBridge.hookAllMethods(wck, "fF", hook)
+        val xfj = XposedHelpers.findClass("xfj", cl)
+        XposedBridge.hookAllMethods(xfj, "fB", hook)
+        XposedBridge.hookAllMethods(xfj, "fC", hook)
         log("overriding ${overrides.size + allowAll.size} flags")
     }
 
@@ -164,7 +166,7 @@ class Entry : IXposedHookLoadPackage {
     }
 
     // Three separate checks must all say "not driving" to keep typing and lists unlocked: the car's driving status
-    // sensor (a bitmask, 0 = unrestricted), liu's parked/moving guess from real speed and gear, and the speed-bump rate
+    // sensor (a bitmask, 0 = unrestricted), mkh's parked/moving guess from real speed and gear, and the speed-bump rate
     // limiter.
     private fun hookDrivingStatus() {
         hookDrivingStatusSensor()
@@ -173,38 +175,49 @@ class Entry : IXposedHookLoadPackage {
     }
 
     // The car reports driving status as sensor 11, a bitmask where 0 means unrestricted.
-    // It enters in the :car process through these three paths, and every other process gets it from there.
+    // It enters the :car process through jik (hands each event to its client binder) and jin.i (serves the cache),
+    // and is rebuilt from its proto in :projection through rvb.n; zeroing the status byte on every path unlocks
+    // every process. The three live in different processes, so each hook stands alone.
     private fun hookDrivingStatusSensor() {
-        val toEvent = object : XC_MethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                if (param.args[0] != SENSOR_DRIVING_STATUS) return
-                val bytes = XposedHelpers.getObjectField(param.result ?: return, "e") as? ByteArray ?: return
-                if (bytes.isNotEmpty()) bytes[0] = 0
-            }
+        val sensorEvent = XposedHelpers.findClass("com.google.android.gms.car.CarSensorEvent", cl)
+        fun zeroStatus(event: Any?) {
+            val bytes = XposedHelpers.getObjectField(event ?: return, "e") as? ByteArray ?: return
+            if (bytes.isNotEmpty()) bytes[0] = 0
         }
-        val abpy = XposedHelpers.findClass("abpy", cl)
-        XposedHelpers.findAndHookMethod("qtd", cl, "n", Int::class.javaPrimitiveType, abpy, toEvent)
-        XposedHelpers.findAndHookMethod("fyq", cl, "f", Int::class.javaPrimitiveType, abpy, toEvent)
-
-        val xkg = XposedHelpers.findClass("xkg", cl)
-        XposedHelpers.findAndHookMethod(
-            "abox", cl, "B",
-            XposedHelpers.findClass("abox", cl), ByteArray::class.java, XposedHelpers.findClass("abol", cl),
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val msg = param.result
-                    if (xkg.isInstance(msg)) XposedHelpers.setIntField(msg, "b", 0)
+        // Events pushed to registered clients: sent to the client binder from inside jik.a, so a before-hook is
+        // the last chance to change the bytes the client sees
+        XposedHelpers.findClassIfExists("jik", cl)?.let { jik ->
+            XposedHelpers.findAndHookMethod(jik, "a", sensorEvent, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (XposedHelpers.getIntField(param.args[0], "b") == SENSOR_DRIVING_STATUS) zeroStatus(param.args[0])
                 }
             })
+        } ?: log("driving status: no sensor client class (jik)")
+        // Cache reads in :car: i(type) builds a fresh event per call, or answers the static empty event
+        XposedHelpers.findClassIfExists("jin", cl)?.let { jin ->
+            XposedHelpers.findAndHookMethod(jin, "i", Int::class.javaPrimitiveType, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (param.args[0] == SENSOR_DRIVING_STATUS) zeroStatus(param.result)
+                }
+            })
+        } ?: log("driving status: no sensor manager class (jin)")
+        // The :projection sensor service rebuilds events from the car's protos
+        XposedHelpers.findClassIfExists("rvb", cl)?.let { rvb ->
+            XposedHelpers.findAndHookMethod(rvb, "n", Int::class.javaPrimitiveType, XposedHelpers.findClass("acpl", cl), object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (param.args[0] == SENSOR_DRIVING_STATUS) zeroStatus(param.result)
+                }
+            })
+        } ?: log("driving status: no projection sensor class (rvb)")
     }
 
-    // liu fuses real speed (GPS/wheel sensors, unrelated to sensor 11) and gear into a parked/moving
+    // mkh fuses real speed (GPS/wheel sensors, unrelated to sensor 11) and gear into a parked/moving
     // LiveData that gates the keyboard and the "Safety pause" overlay. Force its three inputs to
     // "parked" right before every recompute, so a car that's actually moving still reads as parked.
     private fun hookParkedFusion() {
-        val liy = XposedHelpers.findClass("liy", cl)
-        val carParked = XposedHelpers.getStaticObjectField(liy, "b")
-        XposedHelpers.findAndHookMethod("liu", cl, "a", object : XC_MethodHook() {
+        val mkl = XposedHelpers.findClass("mkl", cl)
+        val carParked = XposedHelpers.getStaticObjectField(mkl, "b")
+        XposedHelpers.findAndHookMethod("mkh", cl, "a", object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 XposedHelpers.setObjectField(param.thisObject, "h", carParked)
                 XposedHelpers.setBooleanField(param.thisObject, "i", true)
@@ -226,48 +239,45 @@ class Entry : IXposedHookLoadPackage {
     }
 
     // Setup refuses to project until the Google app, Maps and Speech Services are installed and up to date.
-    // lfp (Android Auto side) and sfo (car setup side) each check one required package: 1 means OK.
+    // thw checks one required package: 1 means OK (a is the package; thx, the gearhead self-check, overrides a and
+    // is left alone). Without the Google app Android Auto also hides every messaging app: kru.b (installed-and-
+    // enabled check for the Google app, asked by the messaging gates kzs/kyy/mwa) forces them kept. Maps can't be
+    // hidden in the launcher customisation like other apps; that check is still unmapped for 18.2.
     private fun hookForcedApps() {
         val ok = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (XposedHelpers.getObjectField(param.thisObject, "a") != GEARHEAD) param.result = 1
             }
         }
-        XposedHelpers.findAndHookMethod("lfp", cl, "b", Context::class.java, ok)
-        XposedHelpers.findAndHookMethod("sfo", cl, "a", Context::class.java, ok)
+        XposedHelpers.findAndHookMethod("thw", cl, "a", Context::class.java, ok)
         // Without the Google app Android Auto hides every messaging app; keep them
-        XposedHelpers.findAndHookMethod("jrl", cl, "b", Context::class.java, XC_MethodReplacement.returnConstant(true))
-        // Lets Maps be hidden in the launcher customisation like any other app
-        XposedHelpers.findAndHookMethod("nsn", cl, "k", ComponentName::class.java, XC_MethodReplacement.returnConstant(true))
+        XposedHelpers.findAndHookMethod("kru", cl, "b", Context::class.java, XC_MethodReplacement.returnConstant(true))
     }
 
-    // iyh.z(pkg, category, _, checkUses, _, _) is where every car app check ends up: a blocklist, the manifest check M
-    // (a <uses> for the category in the app's car XML, which A finds), then Play Store and signature checks. Keep only
-    // M, as z applies it (not to native apps), so sideloaded apps work and undeclared ones stay out.
+    // jwp.v(pkg, category, checkUses, _) is where every car app check ends up (the verdict behind jwp.k/l's denied-
+    // packages cache, via jwm): a blocklist, the manifest check (a <uses> for the category in the app's car XML,
+    // which jwh.a finds and jwh.c applies), then Play Store and signature checks. Keep only the manifest check, so
+    // sideloaded apps work and undeclared ones stay out. (17.6: iyh.z with iyh.A/iyh.M and Optional wrappers; the
+    // category enum is now rry, whose NATIVE_APP is j.)
     private fun hookAppAllowlist() {
-        val iyh = XposedHelpers.findClass("iyh", cl)
-        val qqe = XposedHelpers.findClass("qqe", cl)
-        val optional = XposedHelpers.findClass("j\$.util.Optional", cl) // AA's desugared Optional, not java.util's
-        val ofNullable = XposedHelpers.findMethodExact(optional, "ofNullable", Any::class.java)
-        val usesXml = XposedHelpers.findMethodExact(iyh, "A", String::class.java)
-        val declaresUses = XposedHelpers.findMethodExact(iyh, "M", optional, optional, String::class.java, qqe)
-        val nativeApp = XposedHelpers.getStaticObjectField(qqe, "j")
+        val jwh = XposedHelpers.findClass("jwh", cl)
+        val rry = XposedHelpers.findClass("rry", cl)
+        val carXml = XposedHelpers.findMethodExact(jwh, "a", String::class.java)
+        val declaresUses = XposedHelpers.findMethodExact(jwh, "c", android.content.res.Resources::class.java, Integer::class.java, String::class.java, rry)
+        val nativeApp = XposedHelpers.getStaticObjectField(rry, "j")
         XposedHelpers.findAndHookMethod(
-            iyh, "z", String::class.java, qqe,
-            Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType,
-            XposedHelpers.findClass("yhx", cl),
+            "jwp", cl, "v", String::class.java, rry,
+            Boolean::class.javaPrimitiveType, XposedHelpers.findClass("zii", cl),
             object : XC_MethodReplacement() {
                 override fun replaceHookedMethod(param: MethodHookParam): Any {
                     val pkg = param.args[0] as String
-                    if (param.args[3] != true || param.args[1] === nativeApp) return true
+                    if (param.args[2] != true || param.args[1] === nativeApp) return true
+                    val verifier = XposedHelpers.getObjectField(param.thisObject, "r")
                     return try {
-                        val desc = usesXml.invoke(param.thisObject, pkg) as Int
+                        val desc = carXml.invoke(verifier, pkg) as Int
                         val res = if (desc == 0) null
                         else AndroidAppHelper.currentApplication().packageManager.getResourcesForApplication(pkg)
-                        declaresUses.invoke(
-                            param.thisObject, ofNullable.invoke(null, res), ofNullable.invoke(null, desc.takeIf { it != 0 }),
-                            pkg, param.args[1]
-                        ) as Boolean
+                        declaresUses.invoke(verifier, res, desc.takeIf { it != 0 }, pkg, param.args[1]) as Boolean
                     } catch (_: Throwable) {
                         false
                     }
@@ -335,13 +345,8 @@ class Entry : IXposedHookLoadPackage {
                 .forEach { XposedBridge.hookMethod(it, providers) }
         }
 
-        // sli.b is isGooglePlayServicesAvailable, which sks (GoogleApiAvailability) also goes through. Every client
-        // asks it before connecting, and without Play Services it answers "missing", so microG would never be asked.
-        XposedHelpers.findAndHookMethod("sli", cl, "b", Context::class.java, Int::class.javaPrimitiveType, object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
-                if (microGPackage(param.args[0] as Context) != null) param.result = 0
-            }
-        })
+        // sli.b (17.6) was isGooglePlayServicesAvailable; its 18.2 name is unmapped, so clients may see "missing"
+        // from Play Services and never ask microG. Pending remap.
 
         // DynamiteModule.h loads Play Services modules only when com.google.android.gms.chimera belongs to
         // com.google.android.gms, which turns away a renamed microG and makes the car service refuse Android Auto's car
@@ -354,16 +359,20 @@ class Entry : IXposedHookLoadPackage {
             }
         })
 
-        // Android Auto lets only Google-signed apps such as Maps use its privileged car APIs (slj.f), which asks microG
-        // with this switch on. microG lacks some keys Google signs its car apps with, so Android Auto refuses Maps
-        // ("Wrong signature") and Maps crashes. Accept those keys too; slf.a is the verifier's own "allowed".
-        XposedHelpers.findAndHookMethod("slj", cl, "f", String::class.java, object : XC_MethodHook() {
+        // Android Auto lets only Google-signed apps such as Maps use its privileged car APIs (sdy.l checks a uid's
+        // packages against the allowlist, tnx.a(context).b(pkg)), which asks microG with this switch on. microG lacks
+        // some keys Google signs its car apps with, so Android Auto refuses Maps ("Wrong signature - go/gearhead-
+        // retail-device", jic) and Maps crashes. Accept those keys too. (17.6: slj.f returned a result object.)
+        XposedHelpers.findAndHookMethod("sdy", cl, "l", Context::class.java, Int::class.javaPrimitiveType, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
-                if (XposedHelpers.getBooleanField(param.result ?: return, "b")) return
-                val context = XposedHelpers.getObjectField(param.thisObject, "d") as Context
-                if (microGPackage(context) == null || !signedWithKeyMicroGMisses(context, param.args[0] as String)) return
-                param.result = XposedHelpers.getStaticObjectField(param.result.javaClass, "a")
-                logOnce("microG: ${param.args[0]} is Google-signed")
+                if (param.result != false) return
+                val context = param.args[0] as Context
+                if (microGPackage(context) == null) return
+                val packages = context.packageManager.getPackagesForUid(param.args[1] as Int) ?: return
+                if (packages.any { signedWithKeyMicroGMisses(context, it) }) {
+                    param.result = true
+                    logOnce("microG: uid ${param.args[1]} (${packages.firstOrNull()}) is Google-signed")
+                }
             }
         })
     }
@@ -502,19 +511,21 @@ class Entry : IXposedHookLoadPackage {
         false
     }
 
-    // mps.b asks each screen region's provider (mpz) for its startup intent: mqb (map regions) answers with the last
-    // navigation app, mqe (the app region) with nothing, and an empty app region makes oyp open the dashboard. Swap the
-    // two. lqn decides music autoplay once per drive; lqj.e is its "user turned autoplay off".
+    // nrs.b builds each display's startup layout (CarActivityLayoutConfig) and asks the provider (nry) of every app and
+    // map region for its startup intent (b(rud)): nsa, which nsb/nsc extend for the map regions, answers with the last
+    // navigation app, nsd (the app region) with nothing, and an empty app region opens the dashboard. Swap the two.
+    // mrp decides music autoplay once per drive; mrl.e is its "no autoplay: user opted out".
     private fun hookStartOnLauncher() {
-        XposedHelpers.findAndHookMethod("mqb", cl, "b", "qsh", object : XC_MethodReplacement() {
+        val region = XposedHelpers.findClass("rud", cl)
+        XposedHelpers.findAndHookMethod("nsa", cl, "b", region, object : XC_MethodReplacement() {
             override fun replaceHookedMethod(param: MethodHookParam) = Intent()
         })
-        XposedHelpers.findAndHookMethod("mqe", cl, "b", "qsh", object : XC_MethodReplacement() {
+        XposedHelpers.findAndHookMethod("nsd", cl, "b", region, object : XC_MethodReplacement() {
             override fun replaceHookedMethod(param: MethodHookParam) = Intent().setComponent(ComponentName(GEARHEAD, APP_LAUNCHER))
         })
-        val decision = XposedHelpers.findClass("lqj", cl)
-        val result = XposedHelpers.findClass("lqk", cl)
-        XposedHelpers.findAndHookMethod("lqn", cl, "get", object : XC_MethodHook() {
+        val decision = XposedHelpers.findClass("mrl", cl)
+        val result = XposedHelpers.findClass("mrm", cl)
+        XposedHelpers.findAndHookMethod("mrp", cl, "get", object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val app = XposedHelpers.getObjectField(param.result ?: return, "b")
                 param.result = XposedHelpers.newInstance(
@@ -524,27 +535,34 @@ class Entry : IXposedHookLoadPackage {
         })
     }
 
-    // Android Auto counts every wired connection as USB and closes them all when the USB state changes (shi.a), even
-    // for a charger. The developer server's connections (the phone screen's) aren't USB, and there's one car connection
-    // at a time, so USB changes are left alone while that's the latest one (jqk.d starts each).
+    // Android Auto closes the current car connection when a USB accessory detaches, even for a charger: rua is a
+    // receiver for it that ruc registers once and for all (handled by rty.a), and jsm/rvf are per-connection
+    // receivers only registered for USB connections (jju.ar/rvg.i). The developer server's connections (the phone
+    // screen's) aren't USB, and there's one car connection at a time, so all of these are left alone while that's
+    // the latest one (jju.ar starts each, keeping rvg's connection type).
     private fun keepPhoneScreenOnUsbChanges() {
-        XposedHelpers.findAndHookMethod("jqk", cl, "d", Long::class.javaPrimitiveType, Int::class.javaPrimitiveType, Bundle::class.java, "rxr", object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("jju", cl, "ar", Long::class.javaPrimitiveType, Int::class.javaPrimitiveType, "com.google.android.gms.carsetup.CarInfoInternal", "kab", Boolean::class.javaPrimitiveType, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 connectionType = param.args[1] as Int
             }
         })
-        XposedHelpers.findAndHookMethod("shi", cl, "a", Intent::class.java, object : XC_MethodHook() {
+        val ignoreUsbDetach = object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                if (connectionType == DEVELOPER_SERVER_CONNECTION) param.result = null
+                if (connectionType == DEVELOPER_SERVER_CONNECTION &&
+                    (param.args[0] as Intent).action == "android.hardware.usb.action.USB_ACCESSORY_DETACHED"
+                ) param.result = null
             }
-        })
+        }
+        XposedHelpers.findAndHookMethod("rty", cl, "a", Intent::class.java, ignoreUsbDetach)
+        XposedHelpers.findAndHookMethod("jsm", cl, "a", Intent::class.java, ignoreUsbDetach)
+        XposedHelpers.findAndHookMethod("rvf", cl, "a", Intent::class.java, ignoreUsbDetach)
     }
 
     @Volatile private var connectionType = 0
 
     // The phone screen's side inside Android Auto: link it to the head unit server (linkPhoneScreen), keep that server
     // (it listens on port 5277 of every network) on the phone itself, and accept exactly AA Mods' certificate besides
-    // the ones chaining to Google's Automotive Link root (the trust manager next to rvx in its car SSLContext).
+    // the ones chaining to Google's Automotive Link root (the trust manager next to syi in its car SSLContext).
     private fun hookPhoneScreen() {
         XposedHelpers.findAndHookMethod(PHONE_SCREEN_SERVER, cl, "onStartCommand", Intent::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
@@ -562,7 +580,7 @@ class Entry : IXposedHookLoadPackage {
         })
         XposedHelpers.findAndHookMethod(SSLContext::class.java, "init", Array<KeyManager>::class.java, Array<TrustManager>::class.java, SecureRandom::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                if ((param.args[0] as? Array<*>)?.firstOrNull()?.javaClass?.name != "rvx") return
+                if ((param.args[0] as? Array<*>)?.firstOrNull()?.javaClass?.name != "syi") return
                 val google = (param.args[1] as? Array<*>)?.firstOrNull() as? X509TrustManager ?: return
                 val context = AndroidAppHelper.currentApplication() ?: return
                 val certificate = moduleContext(context).assets.open("headunit/cert.pem").use {
@@ -573,23 +591,27 @@ class Entry : IXposedHookLoadPackage {
         })
     }
 
-    // ivf.a picks the frame rate for each video mode the car offers: 60 where the car allows it, 30 otherwise. Every
-    // frame is drawn, H.264-encoded and encrypted on the phone, so 30 halves that work (and the bitrate) on 60 fps cars.
+    // Every frame rate the managers pick (kju per mode, kjv static) is applied through jkv.B, which configures the
+    // encoder (jtj.w, the codec's frame rate) and every rendered surface with it. Capping it there caps them all:
+    // every frame is drawn, H.264-encoded and encrypted on the phone, so 30 halves that work (and the bitrate) on
+    // 60 fps cars. (17.6: ivf.a with xqe.)
     private fun hookFrameRate() {
-        XposedHelpers.findAndHookMethod("ivf", cl, "a", "xqe", object : XC_MethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                param.result = minOf(param.result as Int, 30)
+        XposedHelpers.findAndHookMethod("jkv", cl, "B", Int::class.javaPrimitiveType, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                if (param.args[0] as Int > 30) param.args[0] = 30
             }
         })
     }
 
     // Android Auto's own developer setting "Video resolution" (car_video_resolution in its carservice prefs) limits
     // which of the car's video sizes it accepts. It's answered with the user's choice while Android Auto checks the
-    // car's sizes (ivn.B), and only when the car offers one within it: otherwise the car's own size is kept.
+    // car's sizes (jto.D, whose i holds the car's yqf configs with the size code in c), and only when the car offers
+    // one within it: otherwise the car's own size is kept. RESOLUTION_SIZES holds the car's protocol codes, which
+    // yqe.b maps to sizes (1 = 480p, 2 = 720p landscape, 6 = portrait). (17.6: ivn.B with xqd.)
     private fun hookResolution(resolution: String) {
         val allowed = RESOLUTION_SIZES[resolution] ?: return
         val limiting = ThreadLocal<Boolean>()
-        XposedHelpers.findAndHookMethod("ivn", cl, "B", Int::class.javaPrimitiveType, object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("jto", cl, "D", Int::class.javaPrimitiveType, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val configs = XposedHelpers.getObjectField(param.thisObject, "i") as List<*>
                 limiting.set(configs.any { XposedHelpers.getIntField(it, "c") in allowed })
@@ -615,10 +637,10 @@ class Entry : IXposedHookLoadPackage {
     @Volatile private var openMedia: ComponentName? = null
     private val openApps = java.util.Collections.synchronizedMap(LinkedHashMap<ComponentName, String>())
 
-    // mpj.k(region, app, time) records the app now showing in a region, or null when it went away; mqj.b is the app's
-    // category (mqg: NAVIGATION, MEDIA, ...)
+    // nrj.k(region, app, time) records the app now showing in a region, or null when it went away; nsi.a() is the app's
+    // component and nsi.b its category (nsf: NAVIGATION, MEDIA, ...). (17.6: mpj.k with mqj.)
     private fun trackOpenApps() {
-        XposedHelpers.findAndHookMethod("mpj", cl, "k", CAR_REGION_ID, "mqj", Long::class.javaPrimitiveType, object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("nrj", cl, "k", CAR_REGION_ID, "nsi", Long::class.javaPrimitiveType, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val region = param.args[0]
                 val app = param.args[1]
@@ -645,14 +667,18 @@ class Entry : IXposedHookLoadPackage {
         })
     }
 
-    // mun.p shows the dashboard (map and cards) and first starts the default navigation app if none runs. Show it only
-    // when navigation and music are both open; otherwise the rail button switches between the launcher and the one open
-    // app. mpj.f() is the app now showing.
+    // nws (DashboardWindowControllerImpl) and nwh (its shade variant) show the dashboard (map and cards) and first
+    // start the default navigation app if none runs. Show it only when navigation and music are both open; otherwise
+    // the rail button switches between the launcher and the one open app. nrj.f() is the app now showing. The marked
+    // start for the dashboard goes through nrk.i with EXTRA_FOR_DASHBOARD (and nrk.k on other paths), which only
+    // opening a navigation app may do here. (17.6: mun/muc.p and mpk.k.)
     private fun dashboardShowsOnlyOpenApps() {
-        // Android Auto has two dashboard controllers (mun, muc) and uses one per layout; both start the default
-        // navigation app to fill the dashboard's map, marking that start for the dashboard, which only opening a
-        // navigation app may do here
-        XposedHelpers.findAndHookMethod("mpk", cl, "k", Intent::class.java, "qrh", object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("nrk", cl, "i", Intent::class.java, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                if ((param.args[0] as Intent).getBooleanExtra(EXTRA_FOR_DASHBOARD, false)) param.result = null
+            }
+        })
+        XposedHelpers.findAndHookMethod("nrk", cl, "k", Intent::class.java, XposedHelpers.findClass("rtb", cl), object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 if ((param.args[0] as Intent).getBooleanExtra(EXTRA_FOR_DASHBOARD, false)) param.result = null
             }
@@ -664,20 +690,20 @@ class Entry : IXposedHookLoadPackage {
                 if (nav != null && media != null) return
                 param.result = null
                 val launcher = ComponentName(GEARHEAD, APP_LAUNCHER)
-                val showing = XposedHelpers.callMethod(XposedHelpers.callStaticMethod(XposedHelpers.findClass("mpj", cl), "b"), "f")
+                val showing = XposedHelpers.callMethod(XposedHelpers.callStaticMethod(XposedHelpers.findClass("nrj", cl), "b"), "f")
                     ?.let { XposedHelpers.callMethod(it, "a") }
                 // Starting the open app again is what its launcher icon does: it comes to the front on its own
                 startCarApp(if (showing == launcher) nav ?: media ?: launcher else launcher)
             }
         }
-        for (controller in listOf("mun", "muc")) {
+        for (controller in listOf("nws", "nwh")) {
             XposedHelpers.findAndHookMethod(controller, cl, "p", Boolean::class.javaPrimitiveType, ANIMATION_PARAMS, dashboard)
         }
     }
 
-    // Android Auto's own way to start an app on the car screen (mpk.i, which picks its region)
+    // Android Auto's own way to start an app on the car screen (nrk.i, which picks its region). (17.6: mpk.)
     private fun startCarApp(component: ComponentName, intent: Intent = Intent()) {
-        val starter = XposedHelpers.callStaticMethod(XposedHelpers.findClass("mpk", cl), "a")
+        val starter = XposedHelpers.callStaticMethod(XposedHelpers.findClass("nrk", cl), "a")
         XposedHelpers.callMethod(starter, "i", intent.setComponent(component))
     }
 
@@ -689,11 +715,11 @@ class Entry : IXposedHookLoadPackage {
         railShowsOpenApps()
     }
 
-    // The rail fragment (njv) keeps the apps button (launcher_and_dashboard_icon), or next to phone apps the exit
-    // button (native_app_exit_icon), alone in a container at the rail's end with the mic stacked on it. The recents
-    // button goes in that container, so everything stacked on it moves along.
+    // The rail fragment (omm, 17.6 njv) keeps the apps button (launcher_and_dashboard_icon), or next to phone apps the
+    // exit button (native_app_exit_icon), alone in a container at the rail's end with the mic stacked on it. The
+    // recents button goes in that container, so everything stacked on it moves along.
     private fun recentsButton() {
-        XposedHelpers.findAndHookMethod("njv", cl, "onViewCreated", View::class.java, Bundle::class.java, object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("omm", cl, "onViewCreated", View::class.java, Bundle::class.java, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val root = param.args[0] as View
                 fun id(name: String) = root.resources.getIdentifier(name, "id", GEARHEAD)
@@ -713,17 +739,17 @@ class Entry : IXposedHookLoadPackage {
     }
 
     // The rail's app shortcuts show the open apps, newest first, instead of Android Auto's picks (its navigation, music
-    // and phone apps and a recent one). njv.m binds each slot; nkj.k builds the item for any app, phone apps included,
-    // whose tap starts it the usual way (mpk.i), and an empty item (kfn.h) hides the slot.
+    // and phone apps and a recent one). omm.m binds each slot; olz.m builds the item for any app, phone apps included,
+    // whose tap starts it the usual way, and an empty item (ova.g) hides the slot. (17.6: njv.m, nkf.k, kfn.h.)
     @Volatile private var rail: Any? = null
 
     private fun railShowsOpenApps() {
-        XposedHelpers.findAndHookMethod("njv", cl, "onViewCreated", View::class.java, Bundle::class.java, object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("omm", cl, "onViewCreated", View::class.java, Bundle::class.java, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 rail = param.thisObject
             }
         })
-        XposedHelpers.findAndHookMethod("njv", cl, "m", RAIL_SLOT, "nne", object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("omm", cl, "m", RAIL_SLOT, "opl", object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val view = param.args[0] as View
                 val slot = if (view.id == View.NO_ID) -1 else RAIL_SLOTS.indexOf(view.resources.getResourceEntryName(view.id))
@@ -735,9 +761,9 @@ class Entry : IXposedHookLoadPackage {
     private fun railItem(slot: Int): Any? {
         val model = rail?.let { XposedHelpers.getObjectField(it, "c") } ?: return null
         val app = synchronized(openApps) { openApps.keys.toList() }.asReversed().getOrNull(slot)
-            ?: return XposedHelpers.callStaticMethod(XposedHelpers.findClass("kfn", cl), "h")
-        val recent = XposedHelpers.getStaticObjectField(XposedHelpers.findClass("nkf", cl), "g")
-        return XposedHelpers.callMethod(model, "k", app, recent, false, false, false)
+            ?: return XposedHelpers.callStaticMethod(XposedHelpers.findClass("ova", cl), "g")
+        val recent = XposedHelpers.getStaticObjectField(XposedHelpers.findClass("olw", cl), "f") // RECENT
+        return XposedHelpers.callMethod(model, "m", app, recent, false, false, false)
     }
 
     // Binds all four slots again (fitShortcuts makes room for them, rather than Android Auto's two to four by height)
@@ -825,19 +851,20 @@ class Entry : IXposedHookLoadPackage {
         return RecentsRow(row, button, next)
     }
 
-    // The recents screen borrows the climate control screen (HvacCarActivityService, car activity lgu), which only cars
-    // with climate controls use. qrd.q is a car activity's start intent and ovs.w sets its view; a host still open in
-    // the background comes back through qsk.e (onNewIntent), so the list is rebuilt there too.
+    // The recents screen borrows the climate control screen (HvacCarActivityService, car activity mig in 18.2, which
+    // only cars with climate controls use). rsx.q reads a car activity's start intent (what the host launched it
+    // with, held by its :car client src), rug.e is its onNewIntent (the host re-delivers intents through src.J.e),
+    // and rsx.ev finishes it. The view is set with pxn.w. (17.6: lgu, qrd.q, qsk.e, qrd.ew.)
     private fun recentsScreen() {
-        XposedHelpers.findAndHookMethod("lgu", cl, "a", Bundle::class.java, object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("mig", cl, "a", Bundle::class.java, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val screen = param.thisObject
                 if ((XposedHelpers.callMethod(screen, "q") as? Intent)?.getBooleanExtra(EXTRA_RECENTS, false) == true) showRecents(screen)
             }
         })
-        XposedHelpers.findAndHookMethod("qsk", cl, "e", Intent::class.java, object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("rug", cl, "e", Intent::class.java, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
-                if (param.thisObject.javaClass.name == "lgu" && (param.args[0] as Intent).getBooleanExtra(EXTRA_RECENTS, false)) {
+                if (param.thisObject.javaClass.name == "mig" && (param.args[0] as Intent).getBooleanExtra(EXTRA_RECENTS, false)) {
                     showRecents(param.thisObject)
                 }
             }
@@ -871,10 +898,10 @@ class Entry : IXposedHookLoadPackage {
         }
     }
 
-    // Opens the app, then finishes the recents screen (qrd.ew) so the next time it opens fresh
+    // Opens the app, then finishes the recents screen (rsx.ev, what src.a logs as finish) so the next time it opens fresh
     private fun leaveRecents(screen: Any, app: ComponentName) {
         startCarApp(app)
-        XposedHelpers.callMethod(screen, "ew")
+        XposedHelpers.callMethod(screen, "ev")
     }
 
     // Asks :car to stop the app's car screen, then AA Mods to stop the app itself (not Android Auto's own apps). Music
@@ -906,24 +933,25 @@ class Entry : IXposedHookLoadPackage {
         }.start()
     }
 
-    // Android Auto keeps a media connection (lns, a LiveData) to the music app it shows and reconnects when it dies
-    // (lns.s, up to five times), which would start a closed app again. A closed app's connections are ended (lns.b),
-    // shown disconnected and kept from connecting (lns.a) until it's opened again.
+    // Android Auto keeps a media connection (mow, a LiveData, 17.6 lns) to the music app it shows and reconnects
+    // when it dies (s, up to five attempts, each calling a), which would start a closed app again. A closed app's
+    // connections are ended (b), shown disconnected (m with mot.a(mpv.f), what AA shows for a connection it ended
+    // itself at the end of a car session) and kept from connecting (a) until it's opened again.
     private val musicConnections = java.util.Collections.synchronizedList(ArrayList<java.lang.ref.WeakReference<Any>>())
     private val closedMusicApps: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     private fun keepClosedMusicAppsClosed() {
-        XposedHelpers.findAndHookConstructor("lns", cl, Context::class.java, ComponentName::class.java, object : XC_MethodHook() {
+        XposedHelpers.findAndHookConstructor("mow", cl, Context::class.java, ComponentName::class.java, Bundle::class.java, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 musicConnections += java.lang.ref.WeakReference(param.thisObject)
             }
         })
-        XposedHelpers.findAndHookMethod("lns", cl, "a", object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("mow", cl, "a", object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 if (musicApp(param.thisObject) in closedMusicApps) param.result = null
             }
         })
-        XposedHelpers.findAndHookMethod("mpk", cl, "i", Intent::class.java, object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("nrk", cl, "i", Intent::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 (param.args[0] as Intent).component?.let { reconnectMusicApp(it.packageName) }
             }
@@ -937,10 +965,11 @@ class Entry : IXposedHookLoadPackage {
         musicConnections.mapNotNull { it.get() }.filter { musicApp(it) == app }
     }
 
-    private fun connectionState(name: String) = XposedHelpers.callStaticMethod(XposedHelpers.findClass("lnp", cl), "a",
-        XposedHelpers.getStaticObjectField(XposedHelpers.findClass("lor", cl), name))
+    // mot.a builds the non-connected state (an mpv status with no media or playback): 17.6 lnp.a with lor
+    private fun connectionState(statusField: String) = XposedHelpers.callStaticMethod(XposedHelpers.findClass("mot", cl), "a",
+        XposedHelpers.getStaticObjectField(XposedHelpers.findClass("mpv", cl), statusField))
 
-    // Shown as Android Auto shows a connection it ended itself at the end of a car session (lor.f)
+    // DISCONNECTED_OUT_OF_CONNECTION_LIFECYCLE (mpv.f, 17.6 lor.f)
     private fun endMusicConnections(app: String) {
         closedMusicApps += app
         for (connection in musicConnectionsOf(app)) {
@@ -949,12 +978,16 @@ class Entry : IXposedHookLoadPackage {
         }
     }
 
-    // What lns does when it becomes active (lor.a, connecting), for the connections still watched (eqp.n)
+    // CONNECTING (mpv.a, 17.6 lor.a): mot.a refuses CONNECTED only, but refuses isn't right here either, so the
+    // state is built by hand. For the connections still watched (n, hasActiveObservers, 17.6 lns.n).
     private fun reconnectMusicApp(app: String) {
         if (!closedMusicApps.remove(app)) return
+        val empty = XposedHelpers.callStaticMethod(XposedHelpers.findClass("j$.util.Optional", cl), "empty")
+        val connecting = XposedHelpers.newInstance(XposedHelpers.findClass("mot", cl),
+            XposedHelpers.getStaticObjectField(XposedHelpers.findClass("mpv", cl), "a"), empty, empty)
         for (connection in musicConnectionsOf(app)) {
             if (XposedHelpers.callMethod(connection, "n") != true) continue
-            XposedHelpers.callMethod(connection, "m", connectionState("a"))
+            XposedHelpers.callMethod(connection, "m", connecting)
             XposedHelpers.callMethod(connection, "a")
         }
     }
@@ -965,11 +998,11 @@ class Entry : IXposedHookLoadPackage {
 
     @Volatile private var carActivities: Any? = null
 
-    // ioh, the car activity manager of each car connection, lives in :car. The recents screen asks it to close an app
-    // with a broadcast only Android Auto itself can send: a not-exported receiver, or before Android 13 Android Auto's
-    // own signature permission for exactly that.
+    // jlv, the car activity manager of each car connection (17.6 ioh), lives in :car. The recents screen asks it to
+    // close an app with a broadcast only Android Auto itself can send: a not-exported receiver, or before Android 13
+    // Android Auto's own signature permission for exactly that.
     private fun closeReceiver() {
-        XposedBridge.hookAllConstructors(XposedHelpers.findClass("ioh", cl), object : XC_MethodHook() {
+        XposedBridge.hookAllConstructors(XposedHelpers.findClass("jlv", cl), object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val first = carActivities == null
                 carActivities = param.thisObject
@@ -991,16 +1024,17 @@ class Entry : IXposedHookLoadPackage {
         })
     }
 
-    // What ioh.au does, for hidden screens too: ioh.u holds a manager set per display (inu), whose multimap f gives the
-    // screens (inn) of a component. A started one (H) is stopped the way au stops it (y); one an app in front of it
-    // covers isn't started, so au skips it, and is finished instead (l, finishManager: out of its task and unbound).
+    // What jlv.av ("stopCarActivityManager") does, for hidden screens too: jlv.u holds a screen set per display
+    // (jlh), whose f is a multimap giving the screens (jlb) of a component. A started one (H) is stopped the way av
+    // stops it (y, an instance call in 18.2); one an app in front of it covers isn't started, so av skips it, and is
+    // finished instead (l, finishManager: out of its task and unbound). (17.6: ioh.au with inu and static inn.y.)
     private fun finishCarScreens(carActivities: Any, app: ComponentName) = synchronized(carActivities) {
-        val screen = XposedHelpers.findClass("inn", cl)
-        val stop = XposedHelpers.findMethodExact(screen, "y", screen)
+        val screen = XposedHelpers.findClass("jlb", cl)
+        val stop = XposedHelpers.findMethodExact(screen, "y", Boolean::class.javaPrimitiveType)
         for (display in (XposedHelpers.getObjectField(carActivities, "u") as Map<*, *>).values) {
             val screens = XposedHelpers.callMethod(XposedHelpers.getObjectField(display, "f"), "c", app) as Collection<*>
             for (manager in screens.toList()) {
-                if (XposedHelpers.callMethod(manager, "H") as Boolean) stop.invoke(manager, null) else XposedHelpers.callMethod(manager, "l")
+                if (XposedHelpers.callMethod(manager, "H") as Boolean) stop.invoke(manager, false) else XposedHelpers.callMethod(manager, "l")
             }
         }
     }
@@ -1104,20 +1138,13 @@ class Entry : IXposedHookLoadPackage {
         })
     }
 
-    // The Cradle launcher (mqs) splits apps with mcz: case 9 keeps parked-only ones for the Entertainment tab
-    // (Google's games), case 10 the rest for Car Optimized Apps. Put everything in Car Optimized Apps and drop the
-    // then empty Entertainment tab from the template (TabTemplateInternal copies gnc.d, the tab list).
+    // The Cradle launcher splits apps between an Entertainment tab (Google's games, parked-only) and Car Optimized
+    // Apps. The 17.6 splitter (mcz) is a different class in 18.2 and unmapped, so parked-only apps are left where
+    // Android Auto puts them; the Entertainment tab still drops from the template when empty
+    // (TabTemplateInternal copies gvz.d, the tab list).
     private fun hookLauncherTabs() {
-        XposedHelpers.findAndHookMethod("mcz", cl, "invoke", Any::class.java, object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
-                when (XposedHelpers.getIntField(param.thisObject, "a")) {
-                    9 -> param.result = ArrayList<Any>()
-                    10 -> param.result = ArrayList(param.args[0] as List<*>)
-                }
-            }
-        })
         XposedHelpers.findAndHookConstructor(
-            "com.android.car.libraries.apphost.internal.model.TabTemplateInternal", cl, XposedHelpers.findClass("gnc", cl),
+            "com.android.car.libraries.apphost.internal.model.TabTemplateInternal", cl, XposedHelpers.findClass("gvz", cl),
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val tabs = XposedHelpers.getObjectField(param.args[0], "d") as List<*>
@@ -1140,10 +1167,11 @@ class Entry : IXposedHookLoadPackage {
             })
     }
 
-    // mqs.a builds every launcher tab's grid from its app list (mre, whose a.c.a() is the component). Pinned apps go
-    // first, in the order they were pinned; sortedBy is stable, so the rest keep Android Auto's order.
+    // nsq.a builds every launcher tab's grid from its app list (ntd, whose a.c.a() is the component: ntd.a is the app
+    // entry ntc, ntc.c the app nsi, nsi.a() its component). Pinned apps go first, in the order they were pinned;
+    // sortedBy is stable, so the rest keep Android Auto's order. (17.6: mqs.a with mre.)
     private fun hookPinnedApps(pinned: List<String>) {
-        XposedHelpers.findAndHookMethod("mqs", cl, "a", List::class.java, object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod("nsq", cl, "a", List::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val apps = param.args[0] as? List<*> ?: return
                 param.args[0] = apps.sortedBy {
@@ -1155,16 +1183,18 @@ class Entry : IXposedHookLoadPackage {
         })
     }
 
-    // mqv.e builds the launcher's Google Assistant shortcut tiles; each is keyed by a fake component package
+    // nsu.e builds the launcher's Google Assistant shortcut tiles; each is keyed by a fake component package.
+    // Tiles are nsu (extends ntc, whose c is the app entry, nsi, whose a() is the component); zhh.o copies the list.
+    // (17.6: mqv.e with a ygw copy helper.)
     private fun hookAssistantTiles() {
         val hidden = setOf("NewsAssistantAction", "WeatherAssistantAction")
-        val ygw = XposedHelpers.findClass("ygw", cl)
+        val zhh = XposedHelpers.findClass("zhh", cl)
         XposedHelpers.findAndHookMethod(
-            "mqv", cl, "e", XposedHelpers.findClass("qsh", cl), Boolean::class.javaPrimitiveType,
+            "nsu", cl, "e", XposedHelpers.findClass("rud", cl), Boolean::class.javaPrimitiveType,
             object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val tiles = (param.result as? List<*>) ?: return
-                    param.result = XposedHelpers.callStaticMethod(ygw, "o", tiles.filter {
+                    param.result = XposedHelpers.callStaticMethod(zhh, "o", tiles.filter {
                         val app = XposedHelpers.getObjectField(it, "c")
                         (XposedHelpers.callMethod(app, "a") as ComponentName).packageName !in hidden
                     })
@@ -1172,8 +1202,8 @@ class Entry : IXposedHookLoadPackage {
             })
     }
 
-    // qji is the default app manager; a(mqg) and b(mqg) are what everything asks for the default per category.
-    // mqg.h is the category id: 1 navigation, 3 media.
+    // mit is the default app manager; a(nsf) and b(nsf) are what everything asks for the default per category.
+    // nsf.h is the category id: 1 navigation, 3 media. (17.6: qji with mqg.)
     private fun hookDefaultApps() {
         val chosen = mapOf(1 to Prefs.DEFAULT_NAV, 3 to Prefs.DEFAULT_MEDIA)
             .mapValues { ComponentName.unflattenFromString(prefs.getString(it.value, "").orEmpty()) }
@@ -1184,22 +1214,33 @@ class Entry : IXposedHookLoadPackage {
                 chosen[XposedHelpers.getIntField(param.args[0], "h")]?.let { param.result = it }
             }
         }
-        val mqg = XposedHelpers.findClass("mqg", cl)
-        XposedHelpers.findAndHookMethod("qji", cl, "a", mqg, hook)
-        XposedHelpers.findAndHookMethod("qji", cl, "b", mqg, hook)
+        val nsf = XposedHelpers.findClass("nsf", cl)
+        XposedHelpers.findAndHookMethod("mit", cl, "a", nsf, hook)
+        XposedHelpers.findAndHookMethod("mit", cl, "b", nsf, hook)
     }
 
-    // nuz.j is where every car notification enters (centre and heads-up). Only calls, media and navigation get through.
+    // Every notification the car shows enters as a stream item: ncv (the NotificationListenerService side) converts
+    // each one through an ndn converter (nqa for navigation, mzh subclasses for SMS/IM) into an nqf, and npw (the
+    // "GH.StreamItemManager", implemented by rmn) posts it into the centre's list through m. That's 17.6's nuz.j, and
+    // it covers the centre and the heads-up stream. Calls and media are separate views in 18.2 that never post here,
+    // so what reaches it is navigation (kept) plus third-party notifications and SMS/IM (muted). Messages can also
+    // bypass the stream: mwy.e converts a conversation into the notification projected to the car screen, so they are
+    // dropped there too. aaat is the type proto enum and its constants keep their names at runtime; 17.6's kept
+    // PENDING_CALL/ONGOING_CALL/MEDIA/NAVIGATION/NAVIGATION_ALERT map to CALL/RECENT_CALL/MEDIA and the two nav ones.
     private fun hookNotifications() {
-        val keep = setOf("PENDING_CALL", "ONGOING_CALL", "MEDIA", "NAVIGATION", "NAVIGATION_ALERT")
-        XposedHelpers.findAndHookMethod(
-            "nuz", cl, "j", String::class.java, Long::class.javaPrimitiveType, XposedHelpers.findClass("nvh", cl),
-            object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val type = XposedHelpers.getObjectField(param.args[2], "x") as Enum<*>
-                    if (type.name !in keep) param.result = null
-                }
-            })
+        val keep = setOf("CALL", "RECENT_CALL", "MEDIA", "NAV_NOTIFICATION_NORMAL", "NAV_NOTIFICATION_HERO")
+        XposedHelpers.findAndHookMethod("rmn", cl, "m", "nqf", Boolean::class.javaPrimitiveType, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val item = param.args[0] ?: return
+                val type = XposedHelpers.callMethod(item, "J") as? Enum<*> ?: return
+                if (type.name !in keep) param.result = null
+            }
+        })
+        XposedHelpers.findAndHookMethod("mwy", cl, "e", "mwq", object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                param.result = null
+            }
+        })
     }
 
     // Runs in system_server. A preinstalled Android Auto has Google's privileged allowlist and the car projection role,
