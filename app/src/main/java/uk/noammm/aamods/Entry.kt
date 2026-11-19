@@ -124,16 +124,11 @@ class Entry : IXposedHookLoadPackage {
         val allowAll = if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) setOf(PHONE_APPS_FILTER) else emptySet()
         if (overrides.isEmpty() && allowAll.isEmpty()) return
         flagNames = overrides.keys + allowAll
-        // Package filter proto: b is the has-bits, c the mode (the consumer checks c against the allow-all mode)
-        val allowAllFilter = if (allowAll.isEmpty()) null else XposedHelpers.newInstance(XposedHelpers.findClass("acrw", cl)).also {
-            XposedHelpers.setIntField(it, "b", 1)
-            XposedHelpers.setIntField(it, "c", FILTER_ALLOW_ALL)
-        }
         val hook = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val name = flagName(param.thisObject) ?: return
-                if (allowAllFilter != null && name in allowAll) {
-                    param.result = allowAllFilter
+                if (name in allowAll) {
+                    allowAllFilter(param.result)?.let { param.result = it }
                     return
                 }
                 val value = overrides[name] ?: return
@@ -158,6 +153,31 @@ class Entry : IXposedHookLoadPackage {
         }
         if (getters == 0) log("flags: ${holder.name} has no getters")
         log("overriding ${overrides.size + allowAll.size} flags through $getters getters")
+    }
+
+    // The package list flag's value is Android Auto's own proto for it, so an allow-all answer is built from
+    // the type of the value being replaced: the two int fields are the proto's has-bits and its mode (b and
+    // c in 18.2), and the consumer checks the mode against the allow-all value. Reading the type off the
+    // value keeps the class name out of it, which a rename changes (acrw is a different class in 18.2.664604)
+    private var allowAllProto: Any? = null
+    private fun allowAllFilter(value: Any?): Any? {
+        allowAllProto?.let { return it }
+        val cls = value?.javaClass ?: return null
+        val ints = cls.declaredFields.filter { it.type == Int::class.javaPrimitiveType && !Modifier.isStatic(it.modifiers) }
+        if (ints.size < 2) {
+            log("flags: ${cls.name} is not the package filter")
+            return null
+        }
+        return try {
+            XposedHelpers.newInstance(cls).also { filter ->
+                XposedHelpers.setIntField(filter, ints[0].name, 1)
+                XposedHelpers.setIntField(filter, ints[1].name, FILTER_ALLOW_ALL)
+                allowAllProto = filter
+            }
+        } catch (t: Throwable) {
+            log("flags: no allow-all filter: $t")
+            null
+        }
     }
 
     // The flag name is the handle's String field that reads Container__flag (b in 18.2); the other one is
@@ -219,12 +239,13 @@ class Entry : IXposedHookLoadPackage {
 
     // Three separate checks must all say "not driving" to keep typing and lists unlocked: the car's driving status
     // sensor (a bitmask, 0 = unrestricted), mkh's parked/moving guess from real speed and gear, and the speed-bump rate
-    // limiter.
+    // limiter. Each is installed on its own: the parcel hook is the one that survives renames, so the name-based
+    // hooks above it must not be able to stop it from being installed
     private fun hookDrivingStatus() {
-        hookDrivingStatusSensor()
-        hookDrivingStatusParcels()
-        hookParkedFusion()
-        hookSpeedBump()
+        safely("driving status: parcels") { hookDrivingStatusParcels() }
+        safely("driving status: sensor") { hookDrivingStatusSensor() }
+        safely("driving status: parked fusion") { hookParkedFusion() }
+        safely("driving status: speed bump") { hookSpeedBump() }
     }
 
     // The car reports driving status as sensor 11, a bitmask where 0 means unrestricted.
