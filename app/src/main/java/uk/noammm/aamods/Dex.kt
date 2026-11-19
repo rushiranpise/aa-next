@@ -111,6 +111,21 @@ class Dex(private val apk: File?, private val cache: File?, private val cl: Clas
         return names.split(';').mapNotNull { runCatching { XposedHelpers.findClassIfExists(it, cl) }.getOrNull() }
     }
 
+    /**
+     * Every method [query] describes, for the hooks that must cover every implementation rather than
+     * one: sensor events, for example, leave a process through several classes, and a new build may
+     * split or merge them.
+     */
+    fun methods(key: String, query: MethodMatcher.() -> Unit): List<Method> {
+        val descriptors = answer(key) { dex ->
+            // One per line: a method descriptor contains ';' in every object type
+            dex.findMethod { matcher(MethodMatcher().apply(query)) }.joinToString("|") { it.toDexMethod().toString() }
+        } ?: return emptyList()
+        return descriptors.split('|').filter { it.isNotBlank() }.mapNotNull {
+            runCatching { DexMethod.deserialize(it).getMethodInstance(cl) }.getOrNull()
+        }.toList()
+    }
+
     /** Frees the native dex index; a later query reads the dex files again. */
     fun close() {
         bridge?.let { runCatching { it.close() } }
