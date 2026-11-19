@@ -30,12 +30,19 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    packaging {
+        // DexKit reads Android Auto's dex files to find classes again after an update. It loads
+        // libdexkit.so from the module's lib directory, which Xposed only puts on the search path when
+        // the installer extracts the libraries (Dex.kt falls back to the module's APK without this)
+        jniLibs { useLegacyPackaging = true }
+    }
 }
 
 dependencies {
     compileOnly("de.robv.android.xposed:api:82")
     implementation("com.google.android.material:material:1.14.0")
     implementation("com.google.protobuf:protobuf-javalite:3.25.5")
+    implementation("org.luckypray:dexkit:2.3.0")
 }
 
 // The Android Auto protocol messages of the phone screen head unit, from Headunit Revived's .proto files

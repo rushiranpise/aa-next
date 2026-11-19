@@ -1,0 +1,216 @@
+package uk.noammm.aamods
+
+import android.os.Build
+import android.os.SystemClock
+import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XposedHelpers
+import org.luckypray.dexkit.DexKitBridge
+import org.luckypray.dexkit.query.matchers.ClassMatcher
+import org.luckypray.dexkit.query.matchers.MethodMatcher
+import org.luckypray.dexkit.wrap.DexMethod
+import java.io.File
+import java.lang.reflect.Method
+import java.util.zip.ZipFile
+
+/**
+ * Android Auto keeps the names of its manifest components, of the GMS Car API and of the framework
+ * methods it overrides, and renames every other class (about 25,000 of them) with each build, often
+ * reusing the old names for different classes. So every hook has two ways to find what it needs: the
+ * name it had in 18.2, accepted only when the class still has the method with the expected signature,
+ * and a DexKit query over the installed APK that finds it again from the kept types in its signature,
+ * its shape, or the strings it logs.
+ *
+ * The name is always tried first: on 18.2 nothing is parsed, so the queries cost nothing until an
+ * update renames something. The dex is then read once per process (DexKit's native library, taken
+ * from the module's own APK) and the answer written to Android Auto's cache directory, so the next
+ * process and every start after that only read a line. The log says which path found each hook
+ * ("dex: frame.rate = ...") or that neither did.
+ */
+class Dex(private val apk: File?, private val cache: File?, private val cl: ClassLoader) {
+
+    // "key=answer" lines from earlier runs, and the answers found in this one
+    private val answers = HashMap<String, String>()
+    private var read = false
+    private var bridge: DexKitBridge? = null
+    private var nativeTried = false
+
+    // One cache file per Android Auto build: an update replaces the APK, which changes both length and
+    // timestamp, so the old answers are never even read
+    private val cacheFile: File? by lazy {
+        val dir = cache ?: return@lazy null
+        val stamp = apk?.let { "${it.length()}-${it.lastModified()}" } ?: "unknown"
+        File(dir, "aa-mods-dex-$stamp.txt")
+    }
+
+    /**
+     * A method of Android Auto: [methodName] on [className] with exactly [params] when that still
+     * exists (the 18.2 name), otherwise the single method [query] describes.
+     */
+    fun method(key: String, className: String, methodName: String, vararg params: Any?, query: MethodMatcher.() -> Unit): Method? {
+        // A renamed parameter type makes the name lookup throw rather than miss
+        try {
+            XposedHelpers.findMethodExactIfExists(className, cl, methodName, *params)?.let { return it }
+        } catch (_: Throwable) {
+            // Fall through to the query
+        }
+        val descriptor = answer(key) { dex ->
+            val found = dex.findMethod { matcher(MethodMatcher().apply(query)) }
+            if (found.size != 1) {
+                log("dex: $key matched ${found.size} methods: ${found.take(6).joinToString()}")
+                return@answer null
+            }
+            found[0].toDexMethod().toString()
+        } ?: return null
+        return try {
+            DexMethod.deserialize(descriptor).getMethodInstance(cl)
+        } catch (t: Throwable) {
+            log("dex: $key no longer loads ($descriptor): $t")
+            null
+        }
+    }
+
+    /**
+     * A class of Android Auto: [name] when it still exists (the 18.2 name) and passes [accept], otherwise
+     * the single class [query] describes. [accept] is what keeps a reused name from pointing the hooks at
+     * a different class: shape it checks the same things the query does.
+     */
+    fun clazz(key: String, name: String?, accept: (Class<*>) -> Boolean = { true }, query: ClassMatcher.() -> Unit): Class<*>? {
+        if (name != null) {
+            val named = try {
+                XposedHelpers.findClassIfExists(name, cl)
+            } catch (_: Throwable) {
+                null
+            }
+            if (named != null && runCatching { accept(named) }.getOrDefault(false)) return named
+        }
+        val resolved = answer(key) { dex ->
+            val found = dex.findClass { matcher(ClassMatcher().apply(query)) }
+            if (found.size != 1) {
+                log("dex: $key matched ${found.size} classes: ${found.take(6).joinToString()}")
+                return@answer null
+            }
+            found[0].name
+        } ?: return null
+        return try {
+            XposedHelpers.findClassIfExists(resolved, cl)?.takeIf { runCatching { accept(it) }.getOrDefault(false) }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * Every class [query] describes, for the cases where the class to hook is the one thing several
+     * matches have in common rather than a match itself.
+     */
+    fun classes(key: String, query: ClassMatcher.() -> Unit): List<Class<*>> {
+        val names = answer(key) { dex ->
+            dex.findClass { matcher(ClassMatcher().apply(query)) }.joinToString(";") { it.name }
+        } ?: return emptyList()
+        return names.split(';').mapNotNull { runCatching { XposedHelpers.findClassIfExists(it, cl) }.getOrNull() }
+    }
+
+    /** Frees the native dex index; a later query reads the dex files again. */
+    fun close() {
+        bridge?.let { runCatching { it.close() } }
+        bridge = null
+    }
+
+    // The answer cached for [key], or the one [query] finds now, kept for the other processes
+    private fun answer(key: String, query: (DexKitBridge) -> String?): String? {
+        readAnswers()
+        answers[key]?.let { return it }
+        val value = try {
+            query(bridge())
+        } catch (t: Throwable) {
+            log("dex: $key failed: $t")
+            return null
+        } ?: return null
+        answers[key] = value
+        cacheFile?.let { file ->
+            try {
+                file.parentFile?.mkdirs()
+                file.appendText("$key=$value\n")
+            } catch (_: Throwable) {
+                // A cache that cannot be written only costs the next process a query
+            }
+        }
+        log("dex: $key = $value")
+        return value
+    }
+
+    private fun readAnswers() {
+        if (read) return
+        read = true
+        val file = cacheFile ?: return
+        try {
+            if (!file.exists()) return
+            file.forEachLine { line ->
+                val at = line.indexOf('=')
+                if (at > 0) answers[line.substring(0, at)] = line.substring(at + 1)
+            }
+        } catch (_: Throwable) {
+            // An unreadable cache only costs a query
+        }
+    }
+
+    private fun bridge(): DexKitBridge {
+        bridge?.let { return it }
+        val path = apk?.path ?: error("Android Auto's APK path is unknown")
+        loadNative()
+        val started = SystemClock.elapsedRealtime()
+        log("dex: reading Android Auto's dex files (first query on this build)")
+        return DexKitBridge.create(path).also {
+            bridge = it
+            log("dex: dex files read in ${SystemClock.elapsedRealtime() - started} ms")
+        }
+    }
+
+    // DexKit has no JNI_OnLoad of its own: whoever uses it loads libdexkit.so. Xposed adds the module's
+    // lib directory to the search path only when the installer extracted it, so fall back to copying
+    // the library out of the module's own APK next to Android Auto's cache and loading it from there.
+    // The name includes the module's size and timestamp, so an updated module never loads an old copy,
+    // and each process copies to a temporary name first: another process may be copying the same file
+    // at the same time, and a rename is atomic, so every process loads a complete one
+    private fun loadNative() {
+        if (nativeTried) return
+        nativeTried = true
+        try {
+            System.loadLibrary("dexkit")
+            return
+        } catch (_: UnsatisfiedLinkError) {
+            // Not on the search path: take it from the module's APK
+        }
+        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: error("no supported ABI")
+        val module = moduleApk() ?: error("the module's APK path is unknown")
+        val dir = cache ?: File(System.getProperty("java.io.tmpdir") ?: "/data/local/tmp")
+        dir.mkdirs()
+        val stamp = File(module).let { "${it.length()}-${it.lastModified()}" }
+        val library = File(dir, "libdexkit-$abi-${stamp.hashCode()}.so")
+        if (!library.exists()) {
+            val temp = File(dir, "${library.name}.${android.os.Process.myPid()}.tmp")
+            ZipFile(module).use { zip ->
+                val entry = zip.getEntry("lib/$abi/libdexkit.so") ?: error("no libdexkit.so for $abi in $module")
+                temp.outputStream().use { out -> zip.getInputStream(entry).use { it.copyTo(out) } }
+            }
+            temp.setReadable(true, false)
+            temp.setExecutable(true, false)
+            if (!temp.renameTo(library)) {
+                temp.delete()
+                if (!library.exists()) error("could not put libdexkit.so in ${dir.path}")
+            }
+        }
+        library.setReadable(true, false)
+        library.setExecutable(true, false)
+        System.load(library.path)
+        log("dex: loaded ${library.path}")
+    }
+
+    // The module's own APK, which Xposed loaded this class from
+    private fun moduleApk(): String? = try {
+        Entry::class.java.protectionDomain?.codeSource?.location?.toURI()?.let { File(it).path }
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun log(msg: String) = XposedBridge.log("AAMods: $msg")
+}

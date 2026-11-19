@@ -11,9 +11,11 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.AudioManager
+import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Parcel
 import android.util.TypedValue
 import android.view.KeyEvent
 import android.view.View
@@ -34,6 +36,7 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import de.robv.android.xposed.callbacks.XCallback
+import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.lang.reflect.Method
@@ -58,6 +61,7 @@ import java.util.function.Consumer
 class Entry : IXposedHookLoadPackage {
     private lateinit var prefs: SharedPreferences
     private lateinit var cl: ClassLoader
+    private lateinit var dex: Dex
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName == SYSTEM_FRAMEWORK) {
@@ -68,6 +72,11 @@ class Entry : IXposedHookLoadPackage {
         }
         if (lpparam.packageName != GEARHEAD) return
         cl = lpparam.classLoader
+        dex = Dex(
+            lpparam.appInfo?.sourceDir?.let { File(it) },
+            lpparam.appInfo?.dataDir?.let { File(it, "cache") },
+            cl,
+        )
         prefs = loadPrefs()
         log("loaded into ${lpparam.processName}")
 
@@ -102,13 +111,19 @@ class Entry : IXposedHookLoadPackage {
         if (Prefs.on(prefs, Prefs.HIDE_NEWS_WEATHER)) safely("assistant tiles") { hookAssistantTiles() }
         safely("default apps") { hookDefaultApps() }
         if (Prefs.on(prefs, Prefs.MUTE_NOTIFICATIONS)) safely("notifications") { hookNotifications() }
+        // The dex index is only needed while hooks are being installed
+        safely("dex") { dex.close() }
     }
 
-    // Every Phenotype flag is read through xfj.fB() / xfj.fC(Context); field b holds the flag name
+    // Every Phenotype flag is read through one handle class (xfj in 18.2), whose b field holds the flag
+    // name: fB() reads it and fC(Context) reads it with a context. The class name changes with every
+    // build, but it is the one class that logs "Invalid Phenotype flag value for flag ", and the two
+    // getters are the public methods that return Object either without arguments or with only a Context.
     private fun hookFlags() {
         val overrides = flagOverrides()
         val allowAll = if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) setOf(PHONE_APPS_FILTER) else emptySet()
         if (overrides.isEmpty() && allowAll.isEmpty()) return
+        flagNames = overrides.keys + allowAll
         // Package filter proto: b is the has-bits, c the mode (the consumer checks c against the allow-all mode)
         val allowAllFilter = if (allowAll.isEmpty()) null else XposedHelpers.newInstance(XposedHelpers.findClass("acrw", cl)).also {
             XposedHelpers.setIntField(it, "b", 1)
@@ -116,7 +131,7 @@ class Entry : IXposedHookLoadPackage {
         }
         val hook = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
-                val name = XposedHelpers.getObjectField(param.thisObject, "b") as? String ?: return
+                val name = flagName(param.thisObject) ?: return
                 if (allowAllFilter != null && name in allowAll) {
                     param.result = allowAllFilter
                     return
@@ -125,10 +140,47 @@ class Entry : IXposedHookLoadPackage {
                 convert(param.result, value)?.let { param.result = it }
             }
         }
-        val xfj = XposedHelpers.findClass("xfj", cl)
-        XposedBridge.hookAllMethods(xfj, "fB", hook)
-        XposedBridge.hookAllMethods(xfj, "fC", hook)
-        log("overriding ${overrides.size + allowAll.size} flags")
+        // The accept check is what tells a reused class name from the real one: the handle must still have
+        // an Object-returning getter with no arguments
+        val holder = dex.clazz("flags", "xfj", accept = { c -> c.declaredMethods.any { Modifier.isPublic(it.modifiers) && it.returnType == Any::class.java && it.parameterCount == 0 } }) {
+            usingEqStrings(PHENOTYPE_INVALID_FLAG)
+        } ?: error("no flag handle class")
+        var getters = 0
+        for (method in holder.declaredMethods) {
+            // Public: the getters implement the flag interfaces, so they are public, while the class's
+            // own helper that also returns Object (e in 18.2) is protected and overridden per flag
+            if (method.returnType != Any::class.java || !Modifier.isPublic(method.modifiers)) continue
+            if (Modifier.isStatic(method.modifiers) || Modifier.isAbstract(method.modifiers)) continue
+            if (method.parameterCount > 1) continue
+            if (method.parameterCount == 1 && method.parameterTypes[0] != Context::class.java) continue
+            XposedBridge.hookMethod(method, hook)
+            getters++
+        }
+        if (getters == 0) log("flags: ${holder.name} has no getters")
+        log("overriding ${overrides.size + allowAll.size} flags through $getters getters")
+    }
+
+    // The flag name is the handle's String field that reads Container__flag (b in 18.2); the other one is
+    // the Phenotype package the flag comes from. The field keeps its own name across builds, so it is
+    // resolved once, from the first handle whose name is one of the flags being overridden
+    private var flagNameField: String? = null
+    private var flagNames: Set<String> = emptySet()
+    private fun flagName(flag: Any): String? {
+        val field = flagNameField ?: run {
+            val fields = ArrayList<Pair<String, String>>()
+            var at: Class<*>? = flag.javaClass
+            while (at != null && at != Any::class.java) {
+                for (f in at.declaredFields) {
+                    if (f.type != String::class.java || Modifier.isStatic(f.modifiers)) continue
+                    val value = XposedHelpers.getObjectField(flag, f.name) as? String ?: continue
+                    fields.add(f.name to value)
+                }
+                at = at.superclass
+            }
+            (fields.firstOrNull { it.second in flagNames } ?: fields.firstOrNull { it.second.contains("__") })
+                ?.first?.also { flagNameField = it }
+        } ?: return null
+        return XposedHelpers.getObjectField(flag, field) as? String
     }
 
     private fun flagOverrides(): Map<String, String> {
@@ -170,6 +222,7 @@ class Entry : IXposedHookLoadPackage {
     // limiter.
     private fun hookDrivingStatus() {
         hookDrivingStatusSensor()
+        hookDrivingStatusParcels()
         hookParkedFusion()
         hookSpeedBump()
     }
@@ -209,6 +262,40 @@ class Entry : IXposedHookLoadPackage {
                 }
             })
         } ?: log("driving status: no projection sensor class (rvb)")
+    }
+
+    // Every event that leaves a process is written to a Parcel first, and CarSensorEvent is a kept GMS
+    // class, so its writeToParcel survives the renames that break the three hooks above. The byte is
+    // zeroed for the write and put back afterwards, so Android Auto's own copy stays as it was.
+    private val savedStatus = ThreadLocal<Int>()
+    private fun hookDrivingStatusParcels() {
+        val event = XposedHelpers.findClass("com.google.android.gms.car.CarSensorEvent", cl)
+        // The public int field is the sensor type, the public byte[] the payload; the other int is the
+        // parcel format version, which stays private
+        val ints = event.declaredFields.filter { it.type == Int::class.javaPrimitiveType && !Modifier.isStatic(it.modifiers) }
+        val type = ints.firstOrNull { Modifier.isPublic(it.modifiers) } ?: ints.getOrNull(1) ?: error("no sensor type field")
+        val payloads = event.declaredFields.filter { it.type == ByteArray::class.java && !Modifier.isStatic(it.modifiers) }
+        val payloadField = payloads.firstOrNull { Modifier.isPublic(it.modifiers) } ?: payloads.singleOrNull() ?: error("no sensor payload field")
+        // The fields are picked by access flag rather than name, so they may be private
+        type.isAccessible = true
+        payloadField.isAccessible = true
+        XposedBridge.hookMethod(event.getDeclaredMethod("writeToParcel", Parcel::class.java, Int::class.javaPrimitiveType), object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                if (type.getInt(param.thisObject) != SENSOR_DRIVING_STATUS) return
+                val payload = payloadField.get(param.thisObject) as? ByteArray ?: return
+                if (payload.isEmpty()) return
+                savedStatus.set(payload[0].toInt() and 0xFF)
+                payload[0] = 0
+            }
+
+            override fun afterHookedMethod(param: MethodHookParam) {
+                val saved: Int? = savedStatus.get()
+                if (saved == null) return
+                savedStatus.remove()
+                (payloadField.get(param.thisObject) as? ByteArray)?.let { if (it.isNotEmpty()) it[0] = saved.toByte() }
+            }
+        })
+        log("driving status: sensor events zeroed on the way out")
     }
 
     // mkh fuses real speed (GPS/wheel sensors, unrelated to sensor 11) and gear into a parked/moving
@@ -535,28 +622,60 @@ class Entry : IXposedHookLoadPackage {
         })
     }
 
-    // Android Auto closes the current car connection when a USB accessory detaches, even for a charger: rua is a
-    // receiver for it that ruc registers once and for all (handled by rty.a), and jsm/rvf are per-connection
-    // receivers only registered for USB connections (jju.ar/rvg.i). The developer server's connections (the phone
-    // screen's) aren't USB, and there's one car connection at a time, so all of these are left alone while that's
-    // the latest one (jju.ar starts each, keeping rvg's connection type).
+    // Android Auto closes the current car connection when a USB accessory detaches, even for a charger:
+    // ruc registers rua once and for all, and jsm/rvf are per-connection receivers only registered for USB
+    // connections (jju.ar/rvg.i). The developer server's connections (the phone screen's) aren't USB, and
+    // there's one car connection at a time, so all of these are left alone while that's the latest one.
+    //
+    // Two renames can't break this. The connection type is the second int of the method every car
+    // connection is registered through, which also takes a kept GMS CarInfoInternal, so its descriptor
+    // survives. And rua, jsm and rvf all extend one abstract base that turns onReceive into a(Intent)
+    // (sku in 18.2), so hooking its onReceive, a framework method name, silences the broadcast for every
+    // one of them at once.
     private fun keepPhoneScreenOnUsbChanges() {
-        XposedHelpers.findAndHookMethod("jju", cl, "ar", Long::class.javaPrimitiveType, Int::class.javaPrimitiveType, "com.google.android.gms.carsetup.CarInfoInternal", "kab", Boolean::class.javaPrimitiveType, object : XC_MethodHook() {
+        val connection = dex.method(
+            "usb.connection", "jju", "ar",
+            Long::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+            "com.google.android.gms.carsetup.CarInfoInternal", "kab", Boolean::class.javaPrimitiveType,
+        ) {
+            paramTypes("long", "int", "com.google.android.gms.carsetup.CarInfoInternal", null, "boolean")
+            returnType("void")
+        } ?: error("no car connection method")
+        XposedBridge.hookMethod(connection, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 connectionType = param.args[1] as Int
             }
         })
+        val base = usbReceiverBase() ?: error("no USB detach receiver base")
         val ignoreUsbDetach = object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                if (connectionType == DEVELOPER_SERVER_CONNECTION &&
-                    (param.args[0] as Intent).action == "android.hardware.usb.action.USB_ACCESSORY_DETACHED"
-                ) param.result = null
+                val intent = param.args[1] as? Intent ?: return
+                if (connectionType == DEVELOPER_SERVER_CONNECTION && intent.action == USB_ACCESSORY_DETACHED) param.result = null
             }
         }
-        XposedHelpers.findAndHookMethod("rty", cl, "a", Intent::class.java, ignoreUsbDetach)
-        XposedHelpers.findAndHookMethod("jsm", cl, "a", Intent::class.java, ignoreUsbDetach)
-        XposedHelpers.findAndHookMethod("rvf", cl, "a", Intent::class.java, ignoreUsbDetach)
+        XposedBridge.hookMethod(base.getDeclaredMethod("onReceive", Context::class.java, Intent::class.java), ignoreUsbDetach)
+        log("USB detach ignored by ${base.name}")
     }
+
+    // The receivers for USB detach are the classes that handle its action; they all share one base,
+    // which is the class that declares onReceive (sku in 18.2, tried first)
+    private fun usbReceiverBase(): Class<*>? {
+        XposedHelpers.findClassIfExists("sku", cl)?.takeIf { isUsbReceiverBase(it) }?.let { return it }
+        val bases = dex.classes("usb.receivers") { usingEqStrings(USB_ACCESSORY_DETACHED) }
+            .mapNotNull { receiver ->
+                var at: Class<*>? = receiver
+                while (at != null && !isUsbReceiverBase(at)) at = at.superclass
+                at
+            }
+            .distinct()
+        if (bases.size != 1) log("USB detach receivers share ${bases.size} bases: $bases")
+        return bases.singleOrNull()
+    }
+
+    private fun isUsbReceiverBase(c: Class<*>): Boolean =
+        Modifier.isAbstract(c.modifiers) && c.superclass?.name == "android.content.BroadcastReceiver" &&
+            c.declaredMethods.any { it.name == "onReceive" } &&
+            c.declaredMethods.any { Modifier.isAbstract(it.modifiers) && it.parameterTypes.contentEquals(arrayOf(Intent::class.java)) }
 
     @Volatile private var connectionType = 0
 
@@ -595,33 +714,41 @@ class Entry : IXposedHookLoadPackage {
     // encoder (jtj.w, the codec's frame rate) and every rendered surface with it. Capping it there caps them all:
     // every frame is drawn, H.264-encoded and encrypted on the phone, so 30 halves that work (and the bitrate) on
     // 60 fps cars. (17.6: ivf.a with xqe.)
+    //
+    // The applied rate also reaches the encoder's MediaFormat, whose setInteger is a framework method, so that is
+    // capped as well: if jkv.B is renamed the encoder still never sees more than 30, and the log shows whether the
+    // named entry point was found.
     private fun hookFrameRate() {
-        XposedHelpers.findAndHookMethod("jkv", cl, "B", Int::class.javaPrimitiveType, object : XC_MethodHook() {
+        XposedHelpers.findAndHookMethod(MediaFormat::class.java, "setInteger", String::class.java, Int::class.javaPrimitiveType, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                if (param.args[0] as Int > 30) param.args[0] = 30
+                if (param.args[0] == "frame-rate" && (param.args[1] as Int) > FRAME_RATE_CAP) param.args[1] = FRAME_RATE_CAP
+            }
+        })
+        // jkv logs setFrameRateRestriction(%s), and B is its only (int) method: the class's name can change, that
+        // log line and the method's shape can't
+        val apply = dex.method("frame.rate", "jkv", "B", Int::class.javaPrimitiveType) {
+            declaredClass { usingEqStrings(FRAME_RATE_LOG) }
+            paramTypes("int")
+            returnType("void")
+        } ?: return
+        XposedBridge.hookMethod(apply, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                if (param.args[0] as Int > FRAME_RATE_CAP) param.args[0] = FRAME_RATE_CAP
             }
         })
     }
 
     // Android Auto's own developer setting "Video resolution" (car_video_resolution in its carservice prefs) limits
-    // which of the car's video sizes it accepts. It's answered with the user's choice while Android Auto checks the
-    // car's sizes (jto.D, whose i holds the car's yqf configs with the size code in c), and only when the car offers
-    // one within it: otherwise the car's own size is kept. RESOLUTION_SIZES holds the car's protocol codes, which
-    // yqe.b maps to sizes (1 = 480p, 2 = 720p landscape, 6 = portrait). (17.6: ivn.B with xqd.)
+    // which of the car's video sizes it accepts. Reading the preference through the framework's
+    // SharedPreferencesImpl.getString answers it with the user's choice, which is what changing the setting in
+    // Android Auto's own developer screen does; Android Auto still checks the car offers that size before using it
+    // (jto.D, whose i holds the car's yqf configs with the size code in c). RESOLUTION_SIZES holds the car's
+    // protocol codes, which yqe.b maps to sizes (1 = 480p, 2 = 720p landscape, 6 = portrait). (17.6: ivn.B with xqd.)
     private fun hookResolution(resolution: String) {
-        val allowed = RESOLUTION_SIZES[resolution] ?: return
-        val limiting = ThreadLocal<Boolean>()
-        XposedHelpers.findAndHookMethod("jto", cl, "D", Int::class.javaPrimitiveType, object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
-                val configs = XposedHelpers.getObjectField(param.thisObject, "i") as List<*>
-                limiting.set(configs.any { XposedHelpers.getIntField(it, "c") in allowed })
-            }
-
-            override fun afterHookedMethod(param: MethodHookParam) = limiting.remove()
-        })
+        if (resolution !in RESOLUTION_SIZES) return
         XposedHelpers.findAndHookMethod("android.app.SharedPreferencesImpl", cl, "getString", String::class.java, String::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                if (param.args[0] == "car_video_resolution" && limiting.get() == true) param.result = resolution
+                if (param.args[0] == "car_video_resolution") param.result = resolution
             }
         })
     }
@@ -1341,6 +1468,12 @@ class Entry : IXposedHookLoadPackage {
         const val PHONE_SCREEN_SERVER = "com.google.android.projection.gearhead.companion.DeveloperHeadUnitNetworkService"
         const val PHONE_SCREEN_START_MS = 15_000L
         const val DEVELOPER_SERVER_CONNECTION = 3
+        const val USB_ACCESSORY_DETACHED = "android.hardware.usb.action.USB_ACCESSORY_DETACHED"
+        // Logged by the class every Phenotype flag is read through (xfj in 18.2)
+        const val PHENOTYPE_INVALID_FLAG = "Invalid Phenotype flag value for flag "
+        // Logged by the class that applies the frame rate (jkv in 18.2), and the cap AA Mods puts on it
+        const val FRAME_RATE_LOG = "setFrameRateRestriction(%s)"
+        const val FRAME_RATE_CAP = 30
         const val RAIL_SLOT = "com.google.android.apps.auto.components.system.facetbar.hotseat.RailHotseatItemView"
         val RAIL_SLOTS = listOf("hotseat_one", "hotseat_two", "hotseat_three", "hotseat_four")
         const val EXTRA_FOR_DASHBOARD = "com.google.android.apps.auto.components.system.dashboard.EXTRA_FOR_DASHBOARD"
