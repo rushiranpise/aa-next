@@ -24,6 +24,9 @@ object Prefs {
     const val RECENTS = "recents"
     const val HIDE_NEWS_WEATHER = "hide_news_weather"
     const val MUTE_NOTIFICATIONS = "mute_notifications"
+    const val NOTIFICATION_TIMEOUT = "notification_timeout"
+    // Android Auto's own heads-up timeout, in milliseconds
+    const val NOTIFICATION_TIMEOUT_DEFAULT = 8000
     const val NO_TELEMETRY = "no_telemetry"
     const val LIGHTER = "lighter"
     const val VIDEO_RESOLUTION = "video_resolution"

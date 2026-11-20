@@ -40,6 +40,7 @@ import de.robv.android.xposed.callbacks.XCallback
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.net.ConnectException
 import java.net.InetAddress
@@ -115,10 +116,10 @@ class Entry : IXposedHookLoadPackage {
         safely("dex") { dex.close() }
     }
 
-    // Every Phenotype flag is read through one handle class (xfj in 18.2), whose b field holds the flag
-    // name: fB() reads it and fC(Context) reads it with a context. The class name changes with every
-    // build, but it is the one class that logs "Invalid Phenotype flag value for flag ", and the two
-    // getters are the public methods that return Object either without arguments or with only a Context.
+    // Every Phenotype flag is read through one handle base class (xgr in 18.2), whose b field holds the
+    // flag name: ew() reads it, ex(Context) reads it with a context, and the typed handles (boolean,
+    // long, double) resolve through ez(), where their own getters end up too. The class name changes
+    // with every build, but it is the one class that logs "Invalid Phenotype flag value for flag ".
     private fun hookFlags() {
         val overrides = flagOverrides()
         val allowAll = if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) setOf(PHONE_APPS_FILTER) else emptySet()
@@ -128,11 +129,17 @@ class Entry : IXposedHookLoadPackage {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val name = flagName(param.thisObject) ?: return
                 if (name in allowAll) {
-                    allowAllFilter(param.result)?.let { param.result = it }
+                    allowAllFilter(param.result)?.let {
+                        param.result = it
+                        logOnce("flag: $name = allow all apps")
+                    }
                     return
                 }
                 val value = overrides[name] ?: return
-                convert(param.result, value)?.let { param.result = it }
+                convert(param.result, value)?.let {
+                    param.result = it
+                    logOnce("flag: $name = $value")
+                }
             }
         }
         // The accept check is what tells a reused class name from the real one: the handle must still have
@@ -152,7 +159,15 @@ class Entry : IXposedHookLoadPackage {
             getters++
         }
         if (getters == 0) log("flags: ${holder.name} has no getters")
-        log("overriding ${overrides.size + allowAll.size} flags through $getters getters")
+        // The typed handles (boolean, long, double) read through their own m() straight into ez(), which the two
+        // getters above never see. ez() is where every read ends up, so overriding its result covers both.
+        val resolver = holder.declaredMethods.firstOrNull {
+            it.returnType == Any::class.java && it.parameterCount == 2 &&
+                it.parameterTypes[1] == Context::class.java && !Modifier.isStatic(it.modifiers)
+        }
+        resolver?.let { XposedBridge.hookMethod(it, hook) }
+        log("overriding ${overrides.size + allowAll.size} flags through $getters getters" +
+            (resolver?.let { " and ${it.name}" } ?: ""))
     }
 
     // The package list flag's value is Android Auto's own proto for it, so an allow-all answer is built from
@@ -182,31 +197,54 @@ class Entry : IXposedHookLoadPackage {
 
     // The flag name is the handle's String field that reads Container__flag (b in 18.2); the other one is
     // the Phenotype package the flag comes from. The field keeps its own name across builds, so it is
-    // resolved once, from the first handle whose name is one of the flags being overridden
-    private var flagNameField: String? = null
+    // resolved once, from the first handle whose name is one of the flags being overridden. The Field
+    // itself is kept, not its name: the typed handles (xhd, xgx) shadow it with fields of other types, so
+    // looking it up by name from the handle would find those instead
+    private var flagNameField: Field? = null
     private var flagNames: Set<String> = emptySet()
     private fun flagName(flag: Any): String? {
         val field = flagNameField ?: run {
-            val fields = ArrayList<Pair<String, String>>()
+            val fields = ArrayList<Pair<Field, String>>()
             var at: Class<*>? = flag.javaClass
             while (at != null && at != Any::class.java) {
                 for (f in at.declaredFields) {
                     if (f.type != String::class.java || Modifier.isStatic(f.modifiers)) continue
-                    val value = XposedHelpers.getObjectField(flag, f.name) as? String ?: continue
-                    fields.add(f.name to value)
+                    val value = try {
+                        f.isAccessible = true
+                        f.get(flag) as? String
+                    } catch (t: Throwable) {
+                        null
+                    } ?: continue
+                    fields.add(f to value)
                 }
                 at = at.superclass
             }
             (fields.firstOrNull { it.second in flagNames } ?: fields.firstOrNull { it.second.contains("__") })
-                ?.first?.also { flagNameField = it }
+                ?.first?.also {
+                    flagNameField = it
+                    logOnce("flags: reading names from ${it.declaringClass.simpleName}.${it.name}")
+                }
         } ?: return null
-        return XposedHelpers.getObjectField(flag, field) as? String
+        return try {
+            field.get(flag) as? String
+        } catch (t: Throwable) {
+            null
+        }
     }
 
     private fun flagOverrides(): Map<String, String> {
         val map = LinkedHashMap<String, String>()
         if (Prefs.on(prefs, Prefs.NO_TELEMETRY)) map.putAll(NO_TELEMETRY_FLAGS)
         if (Prefs.on(prefs, Prefs.LIGHTER)) map.putAll(LIGHTER_FLAGS)
+        // Always parked also moves Android Auto's own speed test, so a speed that reaches a path the sensor and the
+        // fusion hook don't cover still counts as parked (the speed hack from AndroidAutoX and AA Tweaker)
+        if (Prefs.on(prefs, Prefs.NO_LOCKOUTS)) map.putAll(LOCKOUT_FLAGS)
+        // Heads-up notifications stay Android Auto's 8 seconds unless the user picked longer
+        val notificationTimeout = prefs.getInt(Prefs.NOTIFICATION_TIMEOUT, Prefs.NOTIFICATION_TIMEOUT_DEFAULT)
+        if (notificationTimeout != Prefs.NOTIFICATION_TIMEOUT_DEFAULT) {
+            map["SystemUi__hun_default_heads_up_timeout_ms"] = notificationTimeout.toString()
+            map["SystemUi__media_hun_in_rail_widget_timeout_ms"] = notificationTimeout.toString()
+        }
         // Google's hidden "Phone Apps" launcher tab (codename Cradle), which runs phone apps natively on the car
         // screen. Its package filter is replaced in hookFlags, since the default only lets through a few games
         if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) map["CradleFeature__all_app_launcher_enabled"] = "true"
@@ -1670,6 +1708,13 @@ class Entry : IXposedHookLoadPackage {
         // Periodic timers get a one-day interval rather than 0, which their schedulers would reject.
         // The audio stats collector is only created when its period is above 0 (irk).
         private const val DAY_MS = "86400000"
+        // The speeds below which Android Auto's own speed test calls the car parked (1.5 and 0.5 by default). Always
+        // parked raises them so no speed is above them; the sensor parcel and the parked fusion hooks stay the main
+        // path, this one covers the checks that read the raw speed instead
+        val LOCKOUT_FLAGS = mapOf(
+            "CarSensorParameters__max_parked_speed_gps_sensor" to "999.0",
+            "CarSensorParameters__max_parked_speed_wheel_sensor" to "999.0",
+        )
         // Lighter on the phone: Android Auto's own frame rate limits (FrameRateRestrictions), which it otherwise only
         // uses when the phone is severely hot (thermal status 3) or at 15% battery. Below 20 fps the map moves visibly.
         val LIGHTER_FLAGS = mapOf(
@@ -1692,7 +1737,6 @@ class Entry : IXposedHookLoadPackage {
             "VideoDiagnosticsFeature__video_stats_logging_period_ms" to DAY_MS,
             "CarAppLibrary__use_no_op_latency_logger" to "true",
             "ClientAnrs__log_client_anrs" to "false",
-            "MapCapabilitiesGating__metadata_logging_enabled" to "false",
         )
 
         // Google's privapp-permissions allowlist for Android Auto plus the SYSTEM_AUTOMOTIVE_PROJECTION role's

@@ -40,6 +40,8 @@ private const val GEARHEAD = "com.google.android.projection.gearhead"
 private val APP_SCALES = listOf(70, 80, 90, 100, 115, 130, 150)
 // Android Auto's own developer setting values; "" leaves it to the car
 private val RESOLUTIONS = listOf("", "720p", "480p")
+// Android Auto's own heads-up timeout is 8 seconds
+private val NOTIFICATION_TIMEOUTS = listOf(4000, Prefs.NOTIFICATION_TIMEOUT_DEFAULT, 15000, 30000)
 private const val MICROG_DOWNLOAD = "https://github.com/MorpheApp/MicroG-RE/releases/latest"
 private val MICROG_LOCATION = listOf("android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_BACKGROUND_LOCATION")
 // One of the permissions the microG switch's system part grants Android Auto
@@ -114,6 +116,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         section(R.string.section_notifications) {
             toggle(Prefs.MUTE_NOTIFICATIONS, R.drawable.ic_notifications_off, R.string.mute_notifications, R.string.mute_notifications_summary)
+            notificationTimeout()
         }
         section(R.string.section_phone_screen) {
             row(R.drawable.ic_smartphone, R.string.phone_screen).apply {
@@ -377,6 +380,30 @@ class SettingsActivity : AppCompatActivity() {
                 .setSingleChoiceItems(RESOLUTIONS.map { label(it) }.toTypedArray(), current) { dialog, i ->
                     prefs.edit().putString(Prefs.VIDEO_RESOLUTION, RESOLUTIONS[i]).apply()
                     summary.text = label(RESOLUTIONS[i])
+                    dialog.dismiss()
+                }
+                .show()
+        }
+    }
+
+    // How long Android Auto keeps a heads-up notification on screen
+    private fun LinearLayout.notificationTimeout() {
+        val row = row(R.drawable.ic_notifications_off, R.string.notification_timeout)
+        val summary = row.findViewById<TextView>(R.id.summary)
+        fun label(ms: Int) = if (ms == Prefs.NOTIFICATION_TIMEOUT_DEFAULT) {
+            getString(R.string.notification_timeout_default)
+        } else {
+            getString(R.string.notification_timeout_seconds, ms / 1000)
+        }
+        summary.text = label(prefs.getInt(Prefs.NOTIFICATION_TIMEOUT, Prefs.NOTIFICATION_TIMEOUT_DEFAULT))
+        row.setOnClickListener {
+            val current = NOTIFICATION_TIMEOUTS
+                .indexOf(prefs.getInt(Prefs.NOTIFICATION_TIMEOUT, Prefs.NOTIFICATION_TIMEOUT_DEFAULT)).coerceAtLeast(0)
+            MaterialAlertDialogBuilder(this@SettingsActivity)
+                .setTitle(R.string.notification_timeout)
+                .setSingleChoiceItems(NOTIFICATION_TIMEOUTS.map { label(it) }.toTypedArray(), current) { dialog, i ->
+                    prefs.edit().putInt(Prefs.NOTIFICATION_TIMEOUT, NOTIFICATION_TIMEOUTS[i]).apply()
+                    summary.text = label(NOTIFICATION_TIMEOUTS[i])
                     dialog.dismiss()
                 }
                 .show()

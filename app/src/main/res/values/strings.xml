@@ -60,6 +60,9 @@
     <string name="section_notifications">Notifications</string>
     <string name="mute_notifications">Mute notifications</string>
     <string name="mute_notifications_summary">Calls, media and navigation still show</string>
+    <string name="notification_timeout">Notifications stay</string>
+    <string name="notification_timeout_default">Android Auto\'s 8 seconds</string>
+    <string name="notification_timeout_seconds">%1$d seconds</string>
 
     <string name="section_phone_screen">No screen in the car</string>
     <string name="phone_screen">Car screen on this phone</string>
