@@ -40,6 +40,8 @@
     <string name="phone_app_size_default">Android Auto’s size</string>
     <string name="pinned_apps">Pinned apps</string>
     <string name="pinned_apps_none">Choose apps to show first in the launcher</string>
+    <string name="search_apps">Search apps</string>
+    <string name="search_no_apps">No apps match</string>
     <string name="start_on_launcher">Start on the app launcher</string>
     <string name="start_on_launcher_summary">Android Auto opens on its app launcher without starting a navigation app or music. Open what you want yourself</string>
     <string name="recents">Recents button</string>

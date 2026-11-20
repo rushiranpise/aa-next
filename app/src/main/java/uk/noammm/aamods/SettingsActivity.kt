@@ -10,11 +10,15 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -498,11 +502,50 @@ class SettingsActivity : AppCompatActivity() {
         row.setOnClickListener {
             val apps = launcherApps().sortedBy { appLabel(it).lowercase() }
             val order = pinned().filter { it in apps }.toMutableList()
+            val labels = apps.associateWith { appLabel(it) }
+            // A filtered copy of apps; ticks are kept in order by package, so filtering never loses one
+            val shown = apps.toMutableList()
+
+            val view = layoutInflater.inflate(R.layout.dialog_pinned_apps, null) as LinearLayout
+            val query = view.findViewById<TextInputEditText>(R.id.query)
+            val list = view.findViewById<ListView>(R.id.apps)
+            val adapter = ArrayAdapter<String>(this@SettingsActivity, android.R.layout.simple_list_item_multiple_choice)
+            list.adapter = adapter
+            list.emptyView = view.findViewById(R.id.empty)
+            // Tall enough to browse, capped so the dialog still fits on small screens
+            val density = resources.displayMetrics.density
+            view.findViewById<View>(R.id.list_frame).layoutParams.height =
+                (resources.displayMetrics.heightPixels * 0.45f).toInt()
+                    .coerceIn((200 * density).toInt(), (440 * density).toInt())
+
+            fun filter(text: String) {
+                val needle = text.trim()
+                shown.clear()
+                shown += if (needle.isEmpty()) apps else apps.filter { labels.getValue(it).contains(needle, ignoreCase = true) }
+                adapter.clear()
+                adapter.addAll(shown.map { labels.getValue(it) })
+                // Positions changed, so reapply the ticks from the packages rather than the old rows
+                shown.forEachIndexed { i, pkg -> list.setItemChecked(i, pkg in order) }
+            }
+            filter("")
+            query.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(s: Editable?) = filter(s?.toString().orEmpty())
+            })
+            // The list flips the row before the click reaches us, so the new state is the one to keep
+            list.setOnItemClickListener { _, _, position, _ ->
+                val pkg = shown[position]
+                if (list.isItemChecked(position)) {
+                    if (pkg !in order) order += pkg
+                } else {
+                    order -= pkg
+                }
+            }
+
             MaterialAlertDialogBuilder(this@SettingsActivity)
                 .setTitle(R.string.pinned_apps)
-                .setMultiChoiceItems(apps.map { appLabel(it) }.toTypedArray(), apps.map { it in order }.toBooleanArray()) { _, i, checked ->
-                    if (checked) order += apps[i] else order -= apps[i]
-                }
+                .setView(view)
                 .setPositiveButton(android.R.string.ok) { _, _ ->
                     prefs.edit().putString(Prefs.PINNED_APPS, order.joinToString(",")).apply()
                     summary.text = describe(order)
