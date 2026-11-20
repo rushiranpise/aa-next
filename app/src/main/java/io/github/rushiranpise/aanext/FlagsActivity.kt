@@ -1,6 +1,5 @@
 package io.github.rushiranpise.aanext
 
-import android.content.DialogInterface
 import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.os.Bundle

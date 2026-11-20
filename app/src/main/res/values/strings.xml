@@ -28,12 +28,9 @@
     <string name="framework_help_title">Enable AA Next in %1$s</string>
     <string name="framework_help_message">Open your Xposed manager — the LSPosed or Vector app, or the notification it posts. Turn on AA Next, tick Android Auto in its scope (and System Framework if Android Auto didn’t come preinstalled), then come back here.</string>
 
-    <string name="section_status">Status</string>
-    <string name="section_driving">Driving</string>
     <string name="no_lockouts">Always parked</string>
     <string name="no_lockouts_summary">The keyboard, typing and full lists stay unlocked while the car moves, for anyone using the screen</string>
 
-    <string name="section_apps">Apps</string>
     <string name="any_app_launcher">Phone apps on the car screen</string>
     <string name="any_app_launcher_summary">A Phone Apps tab in the launcher opens any app, and the games move into Car Optimized Apps</string>
     <string name="phone_app_size">Phone app size</string>
@@ -60,35 +57,29 @@
     <string name="default_media">Default media</string>
     <string name="android_auto_choice">Android Auto’s choice</string>
 
-    <string name="section_notifications">Notifications</string>
     <string name="mute_notifications">Mute notifications</string>
     <string name="mute_notifications_summary">Calls, media and navigation still show</string>
     <string name="notification_timeout">Notifications stay</string>
     <string name="notification_timeout_default">Android Auto\'s 8 seconds</string>
     <string name="notification_timeout_seconds">%1$d seconds</string>
 
-    <string name="section_phone_screen">No screen in the car</string>
     <string name="phone_screen">Car screen on this phone</string>
     <string name="phone_screen_summary">Shows Android Auto on this phone itself, the way the car screen would. Starts Android Auto’s own head unit server, which needs root</string>
     <string name="headunit_unreachable">Couldn’t reach Android Auto. Allow AA Next root access in your root manager and try again</string>
     <string name="headunit_ended">Android Auto ended the phone screen</string>
 
-    <string name="section_performance">Performance</string>
     <string name="lighter">Lighter on the phone</string>
     <string name="lighter_summary">Draws the car screen at 30 frames a second at most, 20 while nobody touches it, and slows down sooner when the phone gets hot or Battery Saver is on. Helps most on older phones</string>
     <string name="video_resolution">Car screen resolution</string>
     <string name="video_resolution_car">The car’s choice</string>
 
-    <string name="section_privacy">Privacy</string>
     <string name="no_telemetry">Disable telemetry</string>
     <string name="no_telemetry_summary">Stops Android Auto’s telemetry and diagnostics logging</string>
 
-    <string name="section_custom">Custom screen</string>
     <string name="custom_tile">UX Prototype app</string>
     <string name="custom_tile_summary">Android Auto’s hidden web app, opening the page below</string>
     <string name="custom_tile_url">Page it opens</string>
 
-    <string name="section_system">System</string>
     <string name="microg">Use microG instead of Play Services</string>
     <string name="microg_summary">Android Auto gets everything it needs from Play Services from an installed microG app such as Morphe’s MicroG-RE, and never reaches Play Services itself. Works with or without Play Services on the phone</string>
     <string name="microg_missing">Not installed</string>
@@ -103,7 +94,6 @@
     <string name="microg_system_message">Android Auto didn’t come preinstalled on this phone, so it also needs the system access a preinstalled one has. In %1$s, add System Framework to AA Next’ scope, then reboot.</string>
     <string name="later">Later</string>
 
-    <string name="section_flags">Flag overrides</string>
     <string name="flags_hint">Feature flags</string>
     <string name="flags_title">Feature flags</string>
     <string name="flags_body">Android Auto’s hidden switches, by name. Most are development switches: change one or two at a time, and expect some to do nothing on your build.</string>
@@ -147,7 +137,6 @@
     <string name="flags_type_text">Text</string>
     <string name="flags_value">Value</string>
 
-    <string name="section_about">About</string>
     <string name="credit_aa_mods">Based on AA Mods</string>
     <string name="credit_aa_mods_summary">The original project by ImNoammm · opens on GitHub</string>
     <string name="version_title">AA Next %1$s</string>
@@ -185,7 +174,6 @@
     <string name="hook_status_no_report">No report yet</string>
     <string name="hook_status_no_report_body">Android Auto hasn\'t reported its hooks for this Android Auto and AA Next version yet. Use Open Auto on the settings screen, give Android Auto a few seconds, then come back here.</string>
 
-    <string name="restart_aa">Restart Android Auto</string>
     <string name="restart_aa_done">Android Auto restarted</string>
     <string name="restart_aa_failed">Needs root: allow AA Next in your root manager</string>
 
