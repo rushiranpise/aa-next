@@ -173,8 +173,26 @@ class Entry : IXposedHookLoadPackage {
                 it.parameterTypes[1] == Context::class.java && !Modifier.isStatic(it.modifiers)
         }
         resolver?.let { XposedBridge.hookMethod(it, hook) }
-        log("overriding ${overrides.size + allowAll.size} flags through $getters getters" +
-            (resolver?.let { " and ${it.name}" } ?: ""))
+        // The typed handles cache their value in a volatile field and their l(Context) getter returns that
+        // cache without calling ez(). A read before the hook was installed, or a later Phenotype refresh,
+        // would keep the stock value, so override those getters too. They are found by signature, not name:
+        // one Context argument and a boolean, long, double or string result, on a flag-handle subclass.
+        var root: Class<*> = holder
+        while (root.superclass != null && root.superclass != Any::class.java) root = root.superclass!!
+        val typed = listOf<Class<*>>(
+            Boolean::class.javaPrimitiveType!!,
+            Long::class.javaPrimitiveType!!,
+            Double::class.javaPrimitiveType!!,
+            String::class.java,
+        ).flatMap { type ->
+            dex.methods("flags.typed.${type.simpleName}") {
+                returnType(type)
+                paramTypes(Context::class.java)
+            }
+        }.filter { root.isAssignableFrom(it.declaringClass) }
+        typed.forEach { XposedBridge.hookMethod(it, hook) }
+        log("overriding ${overrides.size + allowAll.size} flags through $getters getters, " +
+            (resolver?.let { "${it.name} " } ?: "") + "and ${typed.size} typed getters")
         Status.installed("flags", "${overrides.size + allowAll.size} flags overridden")
     }
 
@@ -1505,7 +1523,8 @@ class Entry : IXposedHookLoadPackage {
     // The Cradle launcher splits apps between an Entertainment tab (Google's games, parked-only) and Car Optimized
     // Apps. The 17.6 splitter (mcz) is a different class in 18.2 and unmapped, so parked-only apps are left where
     // Android Auto puts them; the Entertainment tab still drops from the template when empty
-    // (TabTemplateInternal copies gwf.d, the tab list).
+    // (TabTemplateInternal copies gwf.d, the tab list). The Phone Apps tab is dropped too: in a projected session
+    // opening it ends projection, so hookPhoneAppsInCarGrid puts every launcher app in the car grid instead.
     private fun hookLauncherTabs() {
         XposedHelpers.findAndHookConstructor(
             "com.android.car.libraries.apphost.internal.model.TabTemplateInternal", cl, XposedHelpers.findClass("gwf", cl),
@@ -1513,11 +1532,119 @@ class Entry : IXposedHookLoadPackage {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val tabs = XposedHelpers.getObjectField(param.args[0], "d") as List<*>
                     XposedHelpers.setObjectField(param.args[0], "d", ArrayList(tabs.filter {
-                        XposedHelpers.callMethod(it, "getContentId") != "ENTERTAINMENT_APPS_ID"
+                        XposedHelpers.callMethod(it, "getContentId") !in setOf("ENTERTAINMENT_APPS_ID", "ALL_PHONE_APPS_ID")
                     }))
                 }
             })
-        log("launcher tabs: Entertainment tab dropped from the template")
+        // ntq.b picks the tabbed launcher (nts) only when a car reports a touchscreen. The phone's own head unit
+        // reports none, so it gets the flat launcher (ntp). Both use the same app model (ntk/ntm), so swapping them
+        // keeps the app list and adds the tab host that nts.a and the pinned-app ordering work on.
+        XposedHelpers.findAndHookMethod("ntq", cl, "b", Intent::class.java, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                val flat = param.result ?: return
+                if (!XposedHelpers.findClass("ntp", cl).isInstance(flat)) return
+                runCatching {
+                    val context = XposedHelpers.getObjectField(flat, "a")
+                    val model = XposedHelpers.newInstance(XposedHelpers.findClass("ntm", cl))
+                    val tabbed = XposedHelpers.newInstance(XposedHelpers.findClass("nts", cl), context, model)
+                    XposedHelpers.setObjectField(param.thisObject, "c", tabbed)
+                    param.result = tabbed
+                    log("launcher tabs: flat launcher replaced with the tabbed one")
+                }.onFailure { log("launcher tabs: could not switch to the tabbed launcher: $it") }
+            }
+        })
+        hookPhoneAppsInCarGrid()
+        log("launcher tabs: Entertainment and Phone Apps tabs dropped from the template")
+    }
+
+    // Every launcher app joins the car grid as an Android Auto "native app", the same item type its own Phone Apps tab
+    // uses: nfl.d lists the launcher activities, ntv.b turns one into an icon and label, and nuf adds the notification
+    // badge. The Phone Apps tab itself asks the phone screen for native focus when opened, which ends projection, so
+    // the apps join the car tab instead and stay reachable from the car screen.
+    private fun hookPhoneAppsInCarGrid() {
+        XposedHelpers.findAndHookMethod("nts", cl, "a", List::class.java, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val car = XposedHelpers.getObjectField(param.thisObject, "f")
+                if (param.args[0] !== car) return
+                val apps = param.args[0] as? List<*> ?: return
+                val extra = phoneGridItems() ?: return
+                val seen = apps.mapNotNullTo(HashSet()) { componentPackage(it) }
+                val added = extra.filter { componentPackage(it) !in seen }
+                if (added.isEmpty()) return
+                param.args[0] = ArrayList(apps + added)
+                Status.used("all phone apps")
+                logOnce("phone apps: ${added.size} added to the car grid")
+            }
+        })
+        Status.installed("all phone apps", "car grid")
+    }
+
+    // nts.a builds one entry per app; nuf.a is the app entry (nue), whose c is the app (nti), whose a() is the
+    // component. Packages already in the car list win, so a car app never shows twice.
+    private fun componentPackage(item: Any?): String? = runCatching {
+        val app = XposedHelpers.getObjectField(XposedHelpers.getObjectField(item, "a"), "c")
+        (XposedHelpers.callMethod(app, "a") as ComponentName).packageName
+    }.getOrNull()
+
+    // nfl.d(rvh) returns Android Auto's own launcher-app list. ljo.b().e() is the connected car token it wants, the
+    // same one it reads in its Phone Apps tab. That query runs a Cradle allowlist over the launcher apps, so any
+    // package it skips is added from PackageManager: "all apps" means all of them. Item construction is cached per
+    // process; it costs one PackageManager lookup per app, so it must not run on every template build.
+    @Volatile private var phoneGridItems: List<Any>? = null
+
+    private fun phoneGridItems(): List<Any>? {
+        phoneGridItems?.let { return it }
+        val items = runCatching {
+            val context = (runCatching {
+                XposedHelpers.getObjectField(
+                    XposedHelpers.getStaticObjectField(XposedHelpers.findClass("noa", cl), "a"), "c",
+                )
+            }.getOrNull() ?: AndroidAppHelper.currentApplication()) as? Context ?: return null
+            val rvh = XposedHelpers.callMethod(XposedHelpers.callStaticMethod(XposedHelpers.findClass("ljo", cl), "b"), "e")
+            val entries = XposedHelpers.callStaticMethod(XposedHelpers.findClass("nfl", cl), "d", rvh) as Collection<*>? ?: return null
+            val nti = XposedHelpers.findClass("nti", cl)
+            val ntv = XposedHelpers.findClass("ntv", cl)
+            val nuf = XposedHelpers.findClass("nuf", cl)
+            val iconClass = XposedHelpers.findClass("com.google.android.apps.auto.components.graphics.icon.GhIcon", cl)
+            val native = entries.mapNotNull { entry ->
+                val component = XposedHelpers.callMethod(entry, "a") as? ComponentName ?: return@mapNotNull null
+                component to entry
+            }.distinctBy { (component, _) -> component.packageName }
+            val seen = native.mapTo(HashSet()) { (component, _) -> component.packageName }
+            val nativeType = XposedHelpers.getStaticObjectField(XposedHelpers.findClass("ntf", cl), "a")
+            val extra = context.packageManager.queryIntentActivities(
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0,
+            ).mapNotNull { info ->
+                val component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+                if (component.packageName in seen) return@mapNotNull null
+                runCatching { XposedHelpers.newInstance(nti, component, nativeType, true, true, true) }.getOrNull()
+            }.distinctBy { entry -> (XposedHelpers.callMethod(entry, "a") as ComponentName).packageName }
+            var fallbacks = 0
+            val built = (native.map { (_, entry) -> entry } + extra).mapNotNull { entry ->
+                val component = XposedHelpers.callMethod(entry, "a") as ComponentName
+                val app = runCatching { XposedHelpers.callStaticMethod(ntv, "b", entry) }.getOrNull()
+                    ?: runCatching {
+                        // Some labels are SpannedStrings, which AA's own factory casts to String and crashes on
+                        val icon = XposedHelpers.callStaticMethod(iconClass, "j", component)
+                        val label = context.packageManager.getApplicationLabel(
+                            context.packageManager.getApplicationInfo(component.packageName, 0),
+                        ).toString()
+                        XposedHelpers.newInstance(ntv, entry, icon, label, -1)
+                    }.onFailure { fallbacks++ }.getOrNull()
+                app?.let { runCatching { XposedHelpers.newInstance(nuf, it, false) }.getOrNull() }
+            }
+            log("phone apps: ${built.size} apps from ${native.size} native and ${extra.size} extra entries" +
+                if (fallbacks == 0) "" else " ($fallbacks without a version name)")
+            built
+        }.onFailure {
+            Status.failed("all phone apps", it)
+            log("phone apps: could not build the car grid: $it")
+        }.getOrNull()
+        if (items != null) {
+            phoneGridItems = items
+            Status.installed("all phone apps", "${items.size} apps")
+        }
+        return items
     }
 
     // Phone apps get their own density from the car's screen size and dpi, computed in the AppFunctions schema
