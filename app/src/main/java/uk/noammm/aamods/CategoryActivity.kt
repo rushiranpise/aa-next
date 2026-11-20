@@ -18,6 +18,7 @@ class CategoryActivity : SettingsScreen() {
     private lateinit var category: Category
     private lateinit var toolbar: MaterialToolbar
     private var titleGone = Int.MAX_VALUE
+    private var flagsSummary: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -127,7 +128,22 @@ class CategoryActivity : SettingsScreen() {
             ) { checkMicroG(prompt = true) }.findViewById(R.id.status)
         }
         section(R.string.group_advanced) {
-            field(Prefs.FLAGS, R.drawable.ic_flag, R.string.flags_hint, R.string.flags_helper, multiline = true)
+            row(R.drawable.ic_flag, R.string.flags_hint).apply {
+                flagsSummary = findViewById(R.id.summary)
+                setOnClickListener { open(Intent(this@CategoryActivity, FlagsActivity::class.java)) }
+            }
+        }
+        updateFlags()
+    }
+
+    // The flag editor keeps the same Flag__name=value lines the hook reads, so the row only has to say
+    // how many are set; the count is refreshed when coming back from the editor
+    private fun updateFlags() {
+        val count = FlagOverrides.count(prefs.getString(Prefs.FLAGS, "").orEmpty())
+        flagsSummary?.text = if (count == 0) {
+            getString(R.string.flags_none)
+        } else {
+            resources.getQuantityString(R.plurals.flags_count, count, count)
         }
     }
 
@@ -152,6 +168,9 @@ class CategoryActivity : SettingsScreen() {
 
     override fun onResume() {
         super.onResume()
-        if (::category.isInitialized && category == Category.SYSTEM) checkMicroG(prompt = false)
+        if (::category.isInitialized && category == Category.SYSTEM) {
+            checkMicroG(prompt = false)
+            updateFlags()
+        }
     }
 }

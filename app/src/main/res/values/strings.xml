@@ -104,8 +104,48 @@
     <string name="later">Later</string>
 
     <string name="section_flags">Flag overrides</string>
-    <string name="flags_hint">Flags</string>
-    <string name="flags_helper">One per line: Flag__name=value</string>
+    <string name="flags_hint">Feature flags</string>
+    <string name="flags_title">Feature flags</string>
+    <string name="flags_body">Android Auto’s hidden switches, by name. Most are development switches: change one or two at a time, and expect some to do nothing on your build.</string>
+    <string name="flags_none">No overrides set</string>
+    <plurals name="flags_count">
+        <item quantity="one">%1$d override</item>
+        <item quantity="other">%1$d overrides</item>
+    </plurals>
+    <string name="flags_status">%1$s · restart Android Auto to apply</string>
+    <string name="flags_search">Search flags</string>
+    <string name="flags_all">All</string>
+    <string name="flags_modified">Modified</string>
+    <string name="flags_empty">No flags match</string>
+    <string name="flags_default">Default</string>
+    <string name="flags_overridden">Overridden</string>
+    <string name="flags_invalid">Invalid value</string>
+    <string name="flags_invalid_value">This value doesn’t match the flag’s type, so Android Auto ignores it.</string>
+    <string name="flags_meta">%1$s · default %2$s</string>
+    <string name="flags_meta_custom">%1$s · added by hand</string>
+    <string name="flags_custom">Custom</string>
+    <string name="flags_manage">Manage</string>
+    <string name="flags_add">Add a flag</string>
+    <string name="flags_add_summary">Name, type and value</string>
+    <string name="flags_raw">Raw override list</string>
+    <string name="flags_raw_summary">Edit the stored lines directly</string>
+    <string name="flags_raw_helper">One per line: Flag__name=value. Lines starting with # are ignored.</string>
+    <string name="flags_reset_all">Reset all overrides</string>
+    <string name="flags_reset_all_summary">Removes every flag line. The switches in AA Mods keep working</string>
+    <string name="flags_managed_note">Several AA Mods switches (telemetry, launcher, timeout, widescreen apps) set flags too. Those are managed by their own settings and aren’t listed here.</string>
+    <string name="flags_reset_all_message">Remove all flag overrides? The switches in AA Mods are not affected.</string>
+    <string name="flags_reset">Reset</string>
+    <string name="flags_save">Save</string>
+    <string name="flags_saved">Saved · restart Android Auto to apply</string>
+    <string name="flags_add_title">Add a flag</string>
+    <string name="flags_name">Flag name</string>
+    <string name="flags_name_hint">SystemUi__quick_settings_enabled</string>
+    <string name="flags_name_invalid">Use the form Group__name</string>
+    <string name="flags_type">Type</string>
+    <string name="flags_type_switch">Switch</string>
+    <string name="flags_type_number">Number</string>
+    <string name="flags_type_text">Text</string>
+    <string name="flags_value">Value</string>
 
     <string name="section_about">About</string>
     <string name="version_title">AA Mods %1$s</string>
