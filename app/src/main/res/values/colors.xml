@@ -2,4 +2,10 @@
 <resources>
     <!-- Material 3 has no success colour; these greens sit at the same tone as colorError in each theme -->
     <color name="status_ok">#FF1E7B34</color>
+
+    <!-- The bottom actions: light blue to open Android Auto, dark for the restart -->
+    <color name="action_open_background">#FFA9D6F5</color>
+    <color name="action_open_foreground">#FF102A3C</color>
+    <color name="action_restart_background">#FF2C2C2E</color>
+    <color name="action_restart_foreground">#FFF2F2F2</color>
 </resources>

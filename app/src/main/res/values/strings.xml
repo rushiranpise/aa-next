@@ -115,6 +115,9 @@
     <string name="update_downloading">Downloading AA Mods %1$s</string>
     <string name="update_error">The update failed: %1$s</string>
 
+    <string name="open_auto">Open Auto</string>
+    <string name="open_auto_failed">Couldn\'t open Android Auto</string>
+    <string name="restart_auto">Restart Auto</string>
     <string name="restart_aa">Restart Android Auto</string>
     <string name="restart_aa_done">Android Auto restarted</string>
     <string name="restart_aa_failed">Needs root: allow AA Mods in your root manager</string>

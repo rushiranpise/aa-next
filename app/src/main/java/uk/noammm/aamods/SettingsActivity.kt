@@ -12,7 +12,6 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
 import android.view.View
-import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -22,13 +21,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
-import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
 import androidx.core.widget.NestedScrollView
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.google.android.material.snackbar.Snackbar
@@ -50,7 +48,7 @@ private const val SYSTEM_ACCESS_PROBE = "android.permission.ADD_TRUSTED_DISPLAY"
 class SettingsActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private lateinit var content: LinearLayout
-    private lateinit var restart: ExtendedFloatingActionButton
+    private lateinit var restartAction: MaterialButton
     private lateinit var microgStatus: TextView
     private lateinit var version: View
     private var update: Updates.Release? = null
@@ -67,7 +65,6 @@ class SettingsActivity : AppCompatActivity() {
         }
         setContentView(R.layout.activity_settings)
         content = findViewById(R.id.content)
-        restart = findViewById(R.id.restart)
 
         // The settings live in this app's own file either way: the hooks read them through the bridge
         // provider (Entry), so a framework that doesn't share the module's file, LSPosed for one, still
@@ -86,18 +83,18 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         val scroll = findViewById<NestedScrollView>(R.id.scroll)
+        val actions = findViewById<View>(R.id.actions)
         val listBottom = scroll.paddingBottom
-        val fabBottom = (restart.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin
-        ViewCompat.setOnApplyWindowInsetsListener(scroll) { _, insets ->
+        val actionsBottom = actions.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(actions) { view, insets ->
             val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
             scroll.updatePadding(bottom = listBottom + navBar)
-            restart.updateLayoutParams<ViewGroup.MarginLayoutParams> { bottomMargin = fabBottom + navBar }
+            view.updatePadding(bottom = actionsBottom + navBar)
             insets
         }
-        scroll.setOnScrollChangeListener(NestedScrollView.OnScrollChangeListener { _, _, y, _, oldY ->
-            if (y > oldY) restart.shrink() else if (y < oldY) restart.extend()
-        })
-        restart.setOnClickListener { restartAndroidAuto() }
+        findViewById<MaterialButton>(R.id.open_action).setOnClickListener { openAndroidAuto() }
+        restartAction = findViewById(R.id.restart_action)
+        restartAction.setOnClickListener { restartAndroidAuto() }
 
         section(R.string.section_driving) {
             toggle(Prefs.NO_LOCKOUTS, R.drawable.ic_local_parking, R.string.no_lockouts, R.string.no_lockouts_summary)
@@ -211,22 +208,34 @@ class SettingsActivity : AppCompatActivity() {
                 dialog.dismiss()
                 file.onSuccess { Updates.install(this, it) }.onFailure {
                     Snackbar.make(content, getString(R.string.update_error, it.message ?: it.javaClass.simpleName), Snackbar.LENGTH_LONG)
-                        .setAnchorView(restart)
+                        .setAnchorView(R.id.actions)
                         .show()
                 }
             }
         }
     }
 
+    // Android Auto has no launcher screen on the phone; its settings screen is what the app itself opens
+    private fun openAndroidAuto() {
+        val intent = Intent().setClassName(GEARHEAD, "$GEARHEAD.companion.settings.DefaultSettingsActivity")
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Snackbar.make(content, R.string.open_auto_failed, Snackbar.LENGTH_SHORT)
+                .setAnchorView(R.id.actions)
+                .show()
+        }
+    }
+
     // am force-stop needs a shell or root caller; the first su call makes the root manager ask
     private fun restartAndroidAuto() {
-        restart.isEnabled = false
+        restartAction.isEnabled = false
         Executors.newSingleThreadExecutor().execute {
             val ok = runAsRoot("am force-stop $GEARHEAD")
             runOnUiThread {
-                restart.isEnabled = true
+                restartAction.isEnabled = true
                 Snackbar.make(content, if (ok) R.string.restart_aa_done else R.string.restart_aa_failed, Snackbar.LENGTH_SHORT)
-                    .setAnchorView(restart)
+                    .setAnchorView(R.id.actions)
                     .show()
             }
         }
