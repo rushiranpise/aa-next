@@ -92,7 +92,7 @@
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
 
-    <!-- Always on top: the two actions stay reachable while the settings scroll -->
+    <!-- Always on top: the action stays reachable while the settings scroll -->
     <LinearLayout
         android:id="@+id/actions"
         android:layout_width="match_parent"
@@ -105,35 +105,16 @@
         android:paddingBottom="16dp">
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/open_action"
-            style="?attr/materialButtonStyle"
-            android:layout_width="0dp"
-            android:layout_height="56dp"
-            android:layout_weight="1"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:text="@string/open_auto"
-            android:textAppearance="?attr/textAppearanceLabelLargeEmphasized"
-            app:icon="@drawable/ic_directions_car"
-            app:iconGravity="textStart"
-            app:iconTint="?attr/colorOnPrimary" />
-
-        <Space
-            android:layout_width="12dp"
-            android:layout_height="1dp" />
-
-        <com.google.android.material.button.MaterialButton
             android:id="@+id/restart_action"
-            style="?attr/materialButtonTonalStyle"
-            android:layout_width="0dp"
+            style="?attr/materialButtonStyle"
+            android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:layout_weight="1"
             android:insetTop="0dp"
             android:insetBottom="0dp"
-            android:text="@string/restart_auto"
+            android:text="@string/restart_open_auto"
             android:textAppearance="?attr/textAppearanceLabelLargeEmphasized"
             app:icon="@drawable/ic_restart_alt"
             app:iconGravity="textStart"
-            app:iconTint="?attr/colorOnSecondaryContainer" />
+            app:iconTint="?attr/colorOnPrimary" />
     </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

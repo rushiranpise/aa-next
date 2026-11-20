@@ -104,7 +104,6 @@ abstract class SettingsScreen : AppCompatActivity() {
             view.updatePadding(bottom = actionsBottom + navBar)
             insets
         }
-        findViewById<MaterialButton>(R.id.open_action).setOnClickListener { openAndroidAuto() }
         restartAction = findViewById(R.id.restart_action)
         restartAction.setOnClickListener { restartAndroidAuto() }
     }
@@ -510,24 +509,8 @@ abstract class SettingsScreen : AppCompatActivity() {
         }
     }
 
-    // Android Auto has no launcher screen on the phone; its settings screen is what the app itself opens.
-    // A change still waiting for its restart is applied first, so the timer can't kill the screen just as
-    // it appears.
-    private fun openAndroidAuto() {
-        AutoApply.flush {
-            if (isFinishing || isDestroyed) return@flush
-            val intent = Intent().setClassName(GEARHEAD, "$GEARHEAD.companion.settings.DefaultSettingsActivity")
-            try {
-                startActivity(intent)
-            } catch (_: ActivityNotFoundException) {
-                Snackbar.make(content, R.string.open_auto_failed, Snackbar.LENGTH_SHORT)
-                    .setAnchorView(R.id.actions)
-                    .show()
-            }
-        }
-    }
-
-    // am force-stop needs a shell or root caller; the first su call makes the root manager ask
+    // The one bottom action: restart Android Auto so the current settings load, then open its settings
+    // screen. A pending automatic restart is dropped first, since this restart covers it.
     private fun restartAndroidAuto() {
         AutoApply.cancel()
         restartAction.isEnabled = false
@@ -536,10 +519,26 @@ abstract class SettingsScreen : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 restartAction.isEnabled = true
-                Snackbar.make(content, if (ok) R.string.restart_aa_done else R.string.restart_aa_failed, Snackbar.LENGTH_SHORT)
-                    .setAnchorView(R.id.actions)
-                    .show()
+                if (ok) {
+                    openAndroidAuto()
+                } else {
+                    Snackbar.make(content, R.string.restart_aa_failed, Snackbar.LENGTH_SHORT)
+                        .setAnchorView(R.id.actions)
+                        .show()
+                }
             }
+        }
+    }
+
+    // Android Auto has no launcher screen on the phone; its settings screen is what the app itself opens
+    private fun openAndroidAuto() {
+        val intent = Intent().setClassName(GEARHEAD, "$GEARHEAD.companion.settings.DefaultSettingsActivity")
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Snackbar.make(content, R.string.open_auto_failed, Snackbar.LENGTH_SHORT)
+                .setAnchorView(R.id.actions)
+                .show()
         }
     }
 
@@ -562,9 +561,7 @@ abstract class SettingsScreen : AppCompatActivity() {
 private object AutoApply {
     private val main = Handler(Looper.getMainLooper())
     private lateinit var context: Context
-    private var pending = false
     private val restart = Runnable {
-        pending = false
         val app = context
         Thread {
             val message = applyNow(app)
@@ -574,34 +571,11 @@ private object AutoApply {
 
     fun schedule(context: Context) {
         this.context = context.applicationContext
-        pending = true
         main.removeCallbacks(restart)
         main.postDelayed(restart, APPLY_DELAY_MS)
     }
 
-    // Opening Android Auto while a change is still waiting would let the timer kill the screen just as it
-    // appears, so the change is applied first and then the action runs
-    fun flush(action: () -> Unit) {
-        if (!pending) {
-            action()
-            return
-        }
-        val app = context
-        pending = false
-        main.removeCallbacks(restart)
-        Thread {
-            val message = applyNow(app)
-            main.post {
-                if (message != 0) toast(app, message)
-                action()
-            }
-        }.start()
-    }
-
-    fun cancel() {
-        pending = false
-        main.removeCallbacks(restart)
-    }
+    fun cancel() = main.removeCallbacks(restart)
 
     private fun toast(context: Context, message: Int) {
         main.post { Toast.makeText(context, message, Toast.LENGTH_SHORT).show() }

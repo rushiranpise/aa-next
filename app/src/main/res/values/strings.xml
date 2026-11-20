@@ -102,7 +102,7 @@
         <item quantity="one">%1$d override</item>
         <item quantity="other">%1$d overrides</item>
     </plurals>
-    <string name="flags_status">%1$s · restart Android Auto to apply</string>
+    <string name="flags_status">%1$s · changes apply automatically</string>
     <string name="flags_search">Search flags</string>
     <string name="flags_all">All</string>
     <string name="flags_modified">Changed</string>
@@ -151,9 +151,8 @@
     <string name="update_downloading">Downloading AA Next %1$s</string>
     <string name="update_error">Update failed: %1$s</string>
 
-    <string name="open_auto">Open Android Auto</string>
+    <string name="restart_open_auto">Restart and open Android Auto</string>
     <string name="open_auto_failed">Could not open Android Auto.</string>
-    <string name="restart_auto">Restart Android Auto</string>
     <string name="hook_status">Hook status</string>
     <string name="hook_status_waiting">Waiting for Android Auto…</string>
     <string name="hook_status_all_good">Everything is working</string>
@@ -174,9 +173,8 @@
         <item quantity="other">Used %1$d times this run</item>
     </plurals>
     <string name="hook_status_no_report">No report yet</string>
-    <string name="hook_status_no_report_body">Android Auto has not sent a hook report for these versions yet. Tap Open Android Auto on the settings screen, wait a few seconds, then come back here.</string>
+    <string name="hook_status_no_report_body">Android Auto has not sent a hook report for these versions yet. Tap Restart and open Android Auto at the bottom of the screen, wait a few seconds, then come back here.</string>
 
-    <string name="restart_aa_done">Android Auto restarted</string>
     <string name="restart_aa_failed">Root needed. Allow AA Next in your root manager.</string>
     <string name="settings_apply_later">Saved. It applies after Android Auto restarts.</string>
 
