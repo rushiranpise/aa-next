@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "uk.noammm.aamods"
+    namespace = "io.github.rushiranpise.aanext"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "uk.noammm.aamods"
+        applicationId = "io.github.rushiranpise.aanext"
         minSdk = 26
         targetSdk = 35
         versionCode = 2

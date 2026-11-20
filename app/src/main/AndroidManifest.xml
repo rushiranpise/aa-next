@@ -35,7 +35,7 @@
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:theme="@style/Theme.AAMods">
+        android:theme="@style/Theme.AANext">
         <meta-data android:name="xposedmodule" android:value="true" />
         <meta-data android:name="xposeddescription" android:value="@string/description" />
         <meta-data android:name="xposedminversion" android:value="93" />
@@ -62,7 +62,7 @@
         <!-- The module's requests from inside Android Auto, the only caller it accepts -->
         <provider
             android:name=".AndroidAutoBridge"
-            android:authorities="uk.noammm.aamods.bridge"
+            android:authorities="${applicationId}.bridge"
             android:exported="true" />
 
         <activity

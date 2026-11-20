@@ -1,6 +1,6 @@
 syntax = "proto2";
 
-package uk.noammm.aamods.headunit.proto;
+package io.github.rushiranpise.aanext.headunit.proto;
 option java_outer_classname = "Media";
 
 enum MsgType

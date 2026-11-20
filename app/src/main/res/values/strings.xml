@@ -1,23 +1,23 @@
 <resources>
-    <string name="app_name">AA Mods</string>
+    <string name="app_name">AA Next</string>
     <string name="description">Tweaks for Android Auto</string>
     <string-array name="scope">
         <item>com.google.android.projection.gearhead</item>
         <item>android</item>
     </string-array>
 
-    <string name="not_active">AA Mods isn’t reaching Android Auto yet: it isn’t turned on in the Xposed manager, or Android Auto still needs a restart. Tap here to set it up.</string>
+    <string name="not_active">AA Next isn’t reaching Android Auto yet: it isn’t turned on in the Xposed manager, or Android Auto still needs a restart. Tap here to set it up.</string>
 
-    <string name="welcome_title">Welcome to AA Mods</string>
+    <string name="welcome_title">Welcome to AA Next</string>
     <string name="welcome_text">Tweaks for Android Auto. It works from inside Android Auto as an Xposed module, so check these first.</string>
     <string name="welcome_checks">Setup</string>
     <string name="welcome_continue">Continue</string>
     <string name="check_root">Root access</string>
     <string name="check_root_summary">To restart Android Auto, show the car screen on this phone and close apps for real. Tap to ask again</string>
     <string name="check_xposed">Enabled in %1$s</string>
-    <string name="check_xposed_summary">AA Mods has to be turned on in the Xposed manager’s module list. Tap for how</string>
+    <string name="check_xposed_summary">AA Next has to be turned on in the Xposed manager’s module list. Tap for how</string>
     <string name="check_android_auto">Running in Android Auto</string>
-    <string name="check_android_auto_summary">Android Auto has to be in AA Mods’ scope and restarted after that. Tap to restart it and check again</string>
+    <string name="check_android_auto_summary">Android Auto has to be in AA Next’ scope and restarted after that. Tap to restart it and check again</string>
     <string name="status_checking">Checking…</string>
     <string name="status_granted">Granted</string>
     <string name="status_allow_root">Not allowed</string>
@@ -25,8 +25,8 @@
     <string name="status_not_enabled">Not enabled</string>
     <string name="status_working">Working</string>
     <string name="status_restart_aa">Not yet</string>
-    <string name="framework_help_title">Enable AA Mods in %1$s</string>
-    <string name="framework_help_message">Open your Xposed manager — the LSPosed or Vector app, or the notification it posts. Turn on AA Mods, tick Android Auto in its scope (and System Framework if Android Auto didn’t come preinstalled), then come back here.</string>
+    <string name="framework_help_title">Enable AA Next in %1$s</string>
+    <string name="framework_help_message">Open your Xposed manager — the LSPosed or Vector app, or the notification it posts. Turn on AA Next, tick Android Auto in its scope (and System Framework if Android Auto didn’t come preinstalled), then come back here.</string>
 
     <string name="section_status">Status</string>
     <string name="section_driving">Driving</string>
@@ -70,7 +70,7 @@
     <string name="section_phone_screen">No screen in the car</string>
     <string name="phone_screen">Car screen on this phone</string>
     <string name="phone_screen_summary">Shows Android Auto on this phone itself, the way the car screen would. Starts Android Auto’s own head unit server, which needs root</string>
-    <string name="headunit_unreachable">Couldn’t reach Android Auto. Allow AA Mods root access in your root manager and try again</string>
+    <string name="headunit_unreachable">Couldn’t reach Android Auto. Allow AA Next root access in your root manager and try again</string>
     <string name="headunit_ended">Android Auto ended the phone screen</string>
 
     <string name="section_performance">Performance</string>
@@ -100,7 +100,7 @@
     <string name="microg_location_message">Android Auto now gets the car’s location from %1$s. In its app info, open Permissions, then Location, and choose Allow all the time.</string>
     <string name="microg_location_button">Open app info</string>
     <string name="microg_system_title">Give Android Auto system access</string>
-    <string name="microg_system_message">Android Auto didn’t come preinstalled on this phone, so it also needs the system access a preinstalled one has. In %1$s, add System Framework to AA Mods’ scope, then reboot.</string>
+    <string name="microg_system_message">Android Auto didn’t come preinstalled on this phone, so it also needs the system access a preinstalled one has. In %1$s, add System Framework to AA Next’ scope, then reboot.</string>
     <string name="later">Later</string>
 
     <string name="section_flags">Flag overrides</string>
@@ -131,9 +131,9 @@
     <string name="flags_raw_summary">Edit the stored lines directly</string>
     <string name="flags_raw_helper">One per line: Flag__name=value. Lines starting with # are ignored.</string>
     <string name="flags_reset_all">Reset all overrides</string>
-    <string name="flags_reset_all_summary">Removes every flag line. The switches in AA Mods keep working</string>
-    <string name="flags_managed_note">Several AA Mods switches (telemetry, launcher, timeout, widescreen apps) set flags too. Those are managed by their own settings and aren’t listed here.</string>
-    <string name="flags_reset_all_message">Remove all flag overrides? The switches in AA Mods are not affected.</string>
+    <string name="flags_reset_all_summary">Removes every flag line. The switches in AA Next keep working</string>
+    <string name="flags_managed_note">Several AA Next switches (telemetry, launcher, timeout, widescreen apps) set flags too. Those are managed by their own settings and aren’t listed here.</string>
+    <string name="flags_reset_all_message">Remove all flag overrides? The switches in AA Next are not affected.</string>
     <string name="flags_reset">Reset</string>
     <string name="flags_save">Save</string>
     <string name="flags_saved">Saved · restart Android Auto to apply</string>
@@ -148,14 +148,16 @@
     <string name="flags_value">Value</string>
 
     <string name="section_about">About</string>
-    <string name="version_title">AA Mods %1$s</string>
+    <string name="credit_aa_mods">Based on AA Mods</string>
+    <string name="credit_aa_mods_summary">The original project by ImNoammm · opens on GitHub</string>
+    <string name="version_title">AA Next %1$s</string>
     <string name="update_checking">Checking for updates…</string>
     <string name="update_latest">Up to date</string>
     <string name="update_available">%1$s is out. Tap to update</string>
     <string name="update_failed">Couldn’t check for updates. Tap to try again</string>
-    <string name="update_title">AA Mods %1$s is out</string>
+    <string name="update_title">AA Next %1$s is out</string>
     <string name="update_button">Update</string>
-    <string name="update_downloading">Downloading AA Mods %1$s</string>
+    <string name="update_downloading">Downloading AA Next %1$s</string>
     <string name="update_error">The update failed: %1$s</string>
 
     <string name="open_auto">Open Auto</string>
@@ -171,7 +173,7 @@
     </plurals>
     <string name="hook_status_hint">Open Auto, then come back for the report</string>
     <string name="hook_status_counts_off">%1$d ready · %2$d off · %3$d failed</string>
-    <string name="hook_status_module">AA Mods %1$s · Android Auto %2$s</string>
+    <string name="hook_status_module">AA Next %1$s · Android Auto %2$s</string>
     <string name="hook_status_reported">Reported %1$s · %2$s</string>
     <string name="hook_status_main">main</string>
     <string name="hook_status_ready_group">Ready (%1$d)</string>
@@ -187,11 +189,11 @@
     </plurals>
     <string name="hook_status_explanation">A failed hook no longer matches this Android Auto build. A ready hook is installed, and a counter appears once it has done its work.</string>
     <string name="hook_status_no_report">No report yet</string>
-    <string name="hook_status_no_report_body">Android Auto hasn\'t reported its hooks for this Android Auto and AA Mods version yet. Use Open Auto on the settings screen, give Android Auto a few seconds, then come back here.</string>
+    <string name="hook_status_no_report_body">Android Auto hasn\'t reported its hooks for this Android Auto and AA Next version yet. Use Open Auto on the settings screen, give Android Auto a few seconds, then come back here.</string>
 
     <string name="restart_aa">Restart Android Auto</string>
     <string name="restart_aa_done">Android Auto restarted</string>
-    <string name="restart_aa_failed">Needs root: allow AA Mods in your root manager</string>
+    <string name="restart_aa_failed">Needs root: allow AA Next in your root manager</string>
 
     <!-- The home screen and its category screens. Each category is one screen, and the home card says what
          is inside it without repeating the whole screen title. -->

@@ -13,5 +13,5 @@ dependencyResolutionManagement {
         maven("https://api.xposed.info/")
     }
 }
-rootProject.name = "AA Mods"
+rootProject.name = "AA Next"
 include(":app")
