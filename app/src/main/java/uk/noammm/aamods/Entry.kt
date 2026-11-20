@@ -551,11 +551,19 @@ class Entry : IXposedHookLoadPackage {
             }
         })
 
-        // Android Auto lets only Google-signed apps such as Maps use its privileged car APIs (sdy.l checks a uid's
-        // packages against the allowlist, tnx.a(context).b(pkg)), which asks microG with this switch on. microG lacks
-        // some keys Google signs its car apps with, so Android Auto refuses Maps ("Wrong signature - go/gearhead-
-        // retail-device", jic) and Maps crashes. Accept those keys too. (17.6: slj.f returned a result object.)
-        XposedHelpers.findAndHookMethod("sdy", cl, "l", Context::class.java, Int::class.javaPrimitiveType, object : XC_MethodHook() {
+        // Android Auto lets only Google-signed apps such as Maps use its privileged car APIs. The check is a
+        // Context+uid method that asks the allowlist (tnx.a(context).b(pkg) in 18.2; toy.a(context).b(pkg) in
+        // 664604). microG lacks some keys Google signs its car apps with, so Android Auto refuses Maps ("Wrong
+        // signature - go/gearhead-retail-device", jic) and Maps crashes. Accept those keys too. The class moved
+        // from sdy to sfc in 664604; try both so an older 18.2 keeps working. (17.6: slj.f returned a result object.)
+        val signatureCheck = listOf("sfc", "sdy").firstNotNullOfOrNull { name ->
+            XposedHelpers.findClassIfExists(name, cl)?.let { c ->
+                runCatching {
+                    XposedHelpers.findMethodExact(c, "l", Context::class.java, Int::class.javaPrimitiveType)
+                }.getOrNull()
+            }
+        } ?: error("no Google signature check")
+        XposedBridge.hookMethod(signatureCheck, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.result != false) return
                 val context = param.args[0] as Context
