@@ -1051,15 +1051,17 @@ class Entry : IXposedHookLoadPackage {
     }
 
     // The rail fragment (onn, 17.6 njv) keeps the apps button (launcher_and_dashboard_icon), or next to phone apps the
-    // exit button (native_app_exit_icon), alone in a container at the rail's end with the mic stacked on it. The
-    // recents button goes in that container, so everything stacked on it moves along.
+    // exit button (native_app_exit_icon), alone in a FocusInterceptor at the rail's end with the mic stacked on it.
+    // The recents button goes beside that interceptor, not inside it: the interceptor draws the button's focus ring,
+    // requires its button as its only child, and throws on any other shape. A plain row takes over the interceptor's
+    // slot and, for the apps button, its id, so the mic is still constrained to the pair and moves along with it.
     private fun recentsButton() {
         XposedHelpers.findAndHookMethod("onn", cl, "onViewCreated", View::class.java, Bundle::class.java, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val root = param.args[0] as View
                 fun id(name: String) = root.resources.getIdentifier(name, "id", GEARHEAD)
                 val rows = listOf("launcher_and_dashboard_icon", "native_app_exit_icon")
-                    .mapNotNull { root.findViewById<View>(id(it))?.let { button -> addRecentsNextTo(button) } }
+                    .mapNotNull { root.findViewById<View>(id(it))?.let { button -> addRecentsBeside(button) } }
                 if (rows.isEmpty()) return
                 // Arranged after the layout pass that reveals the rail's shape, never inside it
                 root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -1120,10 +1122,10 @@ class Entry : IXposedHookLoadPackage {
     // The recents button and the button it sits next to: recents first reads top to bottom on a vertical rail. On a
     // horizontal one the button keeps the rail's end and recents goes on its far side: after it when the button is on
     // the left, before it on right-hand drive rails. Called outside layout passes, so moving the views is safe.
-    private class RecentsRow(val row: LinearLayout, val recents: View, val next: View) {
+    private class RecentsRow(val row: LinearLayout, val recents: View, val native: View) {
         fun arrange(vertical: Boolean, railWidth: Int) {
-            val nextOnLeft = IntArray(2).also { next.getLocationInWindow(it) }[0] < railWidth / 2
-            val recentsFirst = vertical || !nextOnLeft
+            val nativeOnLeft = IntArray(2).also { native.getLocationInWindow(it) }[0] < railWidth / 2
+            val recentsFirst = vertical || !nativeOnLeft
             val orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
             if (row.orientation == orientation && (row.getChildAt(0) === recents) == recentsFirst) return
             row.orientation = orientation
@@ -1161,10 +1163,16 @@ class Entry : IXposedHookLoadPackage {
         if (Math.abs(dock.translationY - shift) > 1) dock.translationY = shift
     }
 
-    private fun addRecentsNextTo(next: View): RecentsRow? {
-        val container = next.parent as? ViewGroup ?: return null
+    // The button stays in the FocusInterceptor it came in: that view holds its focus ring, needs the button as its
+    // only child, and is what the rail's focus navigation lands on. The recents button goes beside the interceptor in
+    // a plain row taking over its slot and id, so the apps button keeps working and the mic keeps its constraint.
+    private fun addRecentsBeside(next: View): RecentsRow? {
+        val interceptor = next.parent as? ViewGroup ?: return null
+        if (interceptor.childCount != 1) return null
+        val host = interceptor.parent as? ViewGroup ?: return null
         val context = next.context
         val size = next.layoutParams.width
+        val height = next.layoutParams.height
         val button = ImageView(context).apply {
             val module = moduleContext(context)
             setImageDrawable(module.getDrawable(R.drawable.ic_recents)?.mutate()?.apply { setTint(RAIL_ICON) })
@@ -1177,14 +1185,18 @@ class Entry : IXposedHookLoadPackage {
             contentDescription = module.getString(R.string.recents_title)
             setOnClickListener { startCarApp(ComponentName(GEARHEAD, RECENTS_HOST), Intent().putExtra(EXTRA_RECENTS, true)) }
         }
-        val height = next.layoutParams.height
-        container.removeView(next)
+        val index = host.indexOfChild(interceptor)
+        val params = interceptor.layoutParams
+        val container = interceptor.id
+        host.removeView(interceptor)
+        interceptor.id = View.NO_ID
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
+            id = container
             addView(button, LinearLayout.LayoutParams(size, height))
-            addView(next)
+            addView(interceptor, LinearLayout.LayoutParams(size, height))
         }
-        container.addView(row)
+        host.addView(row, index, params)
         return RecentsRow(row, button, next)
     }
 
