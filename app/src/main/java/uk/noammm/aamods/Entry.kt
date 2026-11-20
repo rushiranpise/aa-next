@@ -1159,7 +1159,8 @@ class Entry : IXposedHookLoadPackage {
     // The recents screen borrows the climate control screen (HvacCarActivityService, car activity miu in 664604, which
     // only cars with climate controls use). rua.s reads a car activity's start intent (what the host launched it
     // with, held by its :car client ssg), rvk.e is its onNewIntent (the host re-delivers intents through ssg.J.e),
-    // and rua.di finishes it. The view is set with pyn.w. (17.6: lgu, qrd.q, qsk.e, qrd.ew.)
+    // and rua.di finishes it. The view is set with pyn.x, the View overload; pyn.w takes a layout resource instead.
+    // (17.6: lgu, qrd.q, qsk.e, qrd.ew.)
     private fun recentsScreen() {
         XposedHelpers.findAndHookMethod("miu", cl, "a", Bundle::class.java, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
@@ -1190,7 +1191,8 @@ class Entry : IXposedHookLoadPackage {
                 afterClosing(screen)
             },
         ).build()
-        XposedHelpers.callMethod(screen, "w", view)
+        // A refusal here leaves Android Auto's climate placeholder on screen, so report it instead of only throwing
+        safely("recents") { XposedHelpers.callMethod(screen, "x", view) }
     }
 
     // One app left: it gets the screen to itself. None left: the launcher. Otherwise the updated list.
