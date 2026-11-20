@@ -2,6 +2,7 @@ package io.github.rushiranpise.aanext
 
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
@@ -10,6 +11,8 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.drawable.Drawable
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
@@ -23,6 +26,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -40,6 +44,13 @@ import com.google.android.material.textfield.TextInputLayout
 import java.util.concurrent.Executors
 
 private const val GEARHEAD = "com.google.android.projection.gearhead"
+// Its startup service brings Android Auto's background processes back after the force-stop that applies a change
+private const val CAR_STARTUP = "$GEARHEAD/com.google.android.apps.auto.carservice.service.impl.GearheadCarStartupService"
+// The public connection provider Android Auto serves for the Car App Library; anything but 0 is a live car
+private const val CAR_CONNECTION = "content://androidx.car.app.connection"
+private const val CAR_CONNECTION_STATE = "CarConnectionState"
+// Long enough to fold a quick run of switch flips into one restart
+private const val APPLY_DELAY_MS = 1000L
 private val APP_SCALES = listOf(70, 80, 90, 100, 115, 130, 150)
 // Android Auto's own developer setting values; "" leaves it to the car
 private val RESOLUTIONS = listOf("", "720p", "480p")
@@ -64,6 +75,12 @@ abstract class SettingsScreen : AppCompatActivity() {
     protected var updateBanner: View? = null
     protected var microgStatus: TextView? = null
 
+    // Every screen writes the same settings file, so every screen's listener fires; AutoApply folds them into
+    // one restart. Without it, a switch would only apply the next time Android Auto happened to be restarted.
+    private val settingsChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        AutoApply.schedule(applicationContext)
+    }
+
     // The tonal pair a category's rows use; the home and the about screen keep the neutral default
     protected var rowContainer = com.google.android.material.R.attr.colorSecondaryContainer
     protected var rowOnContainer = com.google.android.material.R.attr.colorOnSecondaryContainer
@@ -75,8 +92,10 @@ abstract class SettingsScreen : AppCompatActivity() {
     protected fun prepare(contentId: Int, actionsId: Int) {
         // The settings live in this app's own file either way: the hooks read them through the bridge
         // provider (Entry), so a framework that doesn't share the module's file, LSPosed for one, still
-        // gets every change after Android Auto restarts
+        // gets every change. The hooks read the file only when Android Auto's processes start, so a change
+        // also schedules the restart in AutoApply instead of waiting for the user to do it.
         prefs = getSharedPreferences(Prefs.FILE, MODE_PRIVATE)
+        prefs.registerOnSharedPreferenceChangeListener(settingsChanged)
         content = findViewById(contentId)
         val actions = findViewById<View>(actionsId)
         val actionsBottom = actions.paddingBottom
@@ -491,24 +510,31 @@ abstract class SettingsScreen : AppCompatActivity() {
         }
     }
 
-    // Android Auto has no launcher screen on the phone; its settings screen is what the app itself opens
+    // Android Auto has no launcher screen on the phone; its settings screen is what the app itself opens.
+    // A change still waiting for its restart is applied first, so the timer can't kill the screen just as
+    // it appears.
     private fun openAndroidAuto() {
-        val intent = Intent().setClassName(GEARHEAD, "$GEARHEAD.companion.settings.DefaultSettingsActivity")
-        try {
-            startActivity(intent)
-        } catch (_: ActivityNotFoundException) {
-            Snackbar.make(content, R.string.open_auto_failed, Snackbar.LENGTH_SHORT)
-                .setAnchorView(R.id.actions)
-                .show()
+        AutoApply.flush {
+            if (isFinishing || isDestroyed) return@flush
+            val intent = Intent().setClassName(GEARHEAD, "$GEARHEAD.companion.settings.DefaultSettingsActivity")
+            try {
+                startActivity(intent)
+            } catch (_: ActivityNotFoundException) {
+                Snackbar.make(content, R.string.open_auto_failed, Snackbar.LENGTH_SHORT)
+                    .setAnchorView(R.id.actions)
+                    .show()
+            }
         }
     }
 
     // am force-stop needs a shell or root caller; the first su call makes the root manager ask
     private fun restartAndroidAuto() {
+        AutoApply.cancel()
         restartAction.isEnabled = false
-        Executors.newSingleThreadExecutor().execute {
-            val ok = runAsRoot("am force-stop $GEARHEAD")
+        background.execute {
+            val ok = restartAndroidAutoProcesses()
             runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 restartAction.isEnabled = true
                 Snackbar.make(content, if (ok) R.string.restart_aa_done else R.string.restart_aa_failed, Snackbar.LENGTH_SHORT)
                     .setAnchorView(R.id.actions)
@@ -521,4 +547,89 @@ abstract class SettingsScreen : AppCompatActivity() {
         super.onPause()
         currentFocus?.clearFocus()
     }
+
+    override fun onDestroy() {
+        if (::prefs.isInitialized) prefs.unregisterOnSharedPreferenceChangeListener(settingsChanged)
+        super.onDestroy()
+    }
+}
+
+// Applies a settings change without making the user press Restart. Android Auto reads the settings only
+// when its processes start, so the change settles for a moment and then Android Auto is force-stopped and
+// its startup service is started again, which loads the hooks in the background. A restart during
+// projection would end the drive, so that case is left for the next start. The restart is silent when it
+// works; a toast only explains why a change is waiting or could not run.
+private object AutoApply {
+    private val main = Handler(Looper.getMainLooper())
+    private lateinit var context: Context
+    private var pending = false
+    private val restart = Runnable {
+        pending = false
+        val app = context
+        Thread {
+            val message = applyNow(app)
+            if (message != 0) toast(app, message)
+        }.start()
+    }
+
+    fun schedule(context: Context) {
+        this.context = context.applicationContext
+        pending = true
+        main.removeCallbacks(restart)
+        main.postDelayed(restart, APPLY_DELAY_MS)
+    }
+
+    // Opening Android Auto while a change is still waiting would let the timer kill the screen just as it
+    // appears, so the change is applied first and then the action runs
+    fun flush(action: () -> Unit) {
+        if (!pending) {
+            action()
+            return
+        }
+        val app = context
+        pending = false
+        main.removeCallbacks(restart)
+        Thread {
+            val message = applyNow(app)
+            main.post {
+                if (message != 0) toast(app, message)
+                action()
+            }
+        }.start()
+    }
+
+    fun cancel() {
+        pending = false
+        main.removeCallbacks(restart)
+    }
+
+    private fun toast(context: Context, message: Int) {
+        main.post { Toast.makeText(context, message, Toast.LENGTH_SHORT).show() }
+    }
+}
+
+// 0 when the restart ran, otherwise the message explaining why it didn't
+private fun applyNow(context: Context): Int {
+    if (connected(context)) return R.string.settings_apply_later
+    return if (restartAndroidAutoProcesses()) 0 else R.string.restart_aa_failed
+}
+
+// Anything but 0 from Android Auto's public connection provider means a car is attached (1 is a native
+// head unit, 2 is projection), where force-stopping Android Auto would end the drive
+private fun connected(context: Context) = runCatching {
+    context.contentResolver.query(
+        Uri.parse(CAR_CONNECTION),
+        arrayOf(CAR_CONNECTION_STATE),
+        null,
+        null,
+        null,
+    )?.use { it.moveToFirst() && it.getInt(0) != 0 } ?: false
+}.getOrDefault(false)
+
+// force-stop clears the processes that read the old settings; the startup service brings the background
+// ones back so the hooks are already loaded when Android Auto is next opened
+private fun restartAndroidAutoProcesses(): Boolean {
+    if (!runAsRoot("am force-stop $GEARHEAD")) return false
+    runAsRoot("am startservice -n $CAR_STARTUP")
+    return true
 }

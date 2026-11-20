@@ -55,6 +55,9 @@ your Xposed manager before enabling AA Next; settings don't carry over between t
 3. Open AA Next. The first screen checks root, that AA Next is enabled in your Xposed manager and that it's
    running inside Android Auto, and can restart Android Auto for you.
 
+Changing a switch restarts Android Auto in the background, so the change applies without pressing Restart. If
+Android Auto is projecting to a car, it is left running and the change waits for the next restart.
+
 After that it checks GitHub for a new version every time you open it, and updates from inside the app.
 
 A note on the microG switch: its system-access part runs inside `system_server`, which reads the module's own

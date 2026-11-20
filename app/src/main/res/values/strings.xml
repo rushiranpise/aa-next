@@ -126,7 +126,7 @@
     <string name="flags_reset_all_message">Remove all flag overrides? This will not change AA Next\'s own settings.</string>
     <string name="flags_reset">Reset</string>
     <string name="flags_save">Save</string>
-    <string name="flags_saved">Saved · restart Android Auto to apply</string>
+    <string name="flags_saved">Saved</string>
     <string name="flags_add_title">Add a flag</string>
     <string name="flags_name">Flag name</string>
     <string name="flags_name_hint">SystemUi__quick_settings_enabled</string>
@@ -178,6 +178,7 @@
 
     <string name="restart_aa_done">Android Auto restarted</string>
     <string name="restart_aa_failed">Root needed. Allow AA Next in your root manager.</string>
+    <string name="settings_apply_later">Saved. It applies after Android Auto restarts.</string>
 
     <!-- The home screen and its category screens. Each category is one screen, and the home card says what
          is inside it without repeating the whole screen title. -->
