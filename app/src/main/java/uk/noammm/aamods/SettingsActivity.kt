@@ -49,6 +49,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private lateinit var content: LinearLayout
     private lateinit var restartAction: MaterialButton
+    private lateinit var statusRow: View
     private lateinit var microgStatus: TextView
     private lateinit var version: View
     private var update: Updates.Release? = null
@@ -95,6 +96,12 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.open_action).setOnClickListener { openAndroidAuto() }
         restartAction = findViewById(R.id.restart_action)
         restartAction.setOnClickListener { restartAndroidAuto() }
+
+        section(R.string.section_status) {
+            statusRow = row(R.drawable.ic_extension, R.string.hook_status)
+            statusRow.setOnClickListener { startActivity(Intent(this@SettingsActivity, StatusActivity::class.java)) }
+        }
+        refreshStatus()
 
         section(R.string.section_driving) {
             toggle(Prefs.NO_LOCKOUTS, R.drawable.ic_local_parking, R.string.no_lockouts, R.string.no_lockouts_summary)
@@ -147,6 +154,39 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
         checkForUpdates(offer = savedInstanceState == null)
+    }
+
+    private fun refreshStatus() {
+        val summary = statusRow.findViewById<TextView>(R.id.summary)
+        val report = AppState.status(this)
+        if (report == null) {
+            summary.setText(R.string.hook_status_waiting)
+            summary.setTextColor(MaterialColors.getColor(summary, com.google.android.material.R.attr.colorOnSurfaceVariant))
+            return
+        }
+        val hooks = report.optJSONArray("hooks")
+        var ready = 0
+        var off = 0
+        var failed = 0
+        if (hooks != null) for (i in 0 until hooks.length()) {
+            when (hooks.getJSONObject(i).optString("state")) {
+                Status.READY -> ready++
+                Status.OFF -> off++
+                Status.FAILED -> failed++
+            }
+        }
+        summary.text = if (off > 0) {
+            getString(R.string.hook_status_counts_off, ready, off, failed)
+        } else {
+            getString(R.string.hook_status_counts, ready, failed)
+        }
+        summary.setTextColor(
+            when {
+                failed > 0 -> MaterialColors.getColor(summary, androidx.appcompat.R.attr.colorError)
+                ready > 0 -> getColor(R.color.status_ok)
+                else -> MaterialColors.getColor(summary, com.google.android.material.R.attr.colorOnSurfaceVariant)
+            }
+        )
     }
 
     // Each time AA Mods opens, like Kav: a newer release on GitHub is offered right away
@@ -494,6 +534,7 @@ class SettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         checkMicroG(prompt = false)
+        if (::statusRow.isInitialized) refreshStatus()
     }
 
     override fun onPause() {

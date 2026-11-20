@@ -28,6 +28,7 @@
     <string name="framework_help_title">Enable AA Mods in %1$s</string>
     <string name="framework_help_message">Open your Xposed manager — the LSPosed or Vector app, or the notification it posts. Turn on AA Mods, tick Android Auto in its scope (and System Framework if Android Auto didn’t come preinstalled), then come back here.</string>
 
+    <string name="section_status">Status</string>
     <string name="section_driving">Driving</string>
     <string name="no_lockouts">Always parked</string>
     <string name="no_lockouts_summary">The keyboard, typing and full lists stay unlocked while the car moves, for anyone using the screen</string>
@@ -118,6 +119,28 @@
     <string name="open_auto">Open Auto</string>
     <string name="open_auto_failed">Couldn\'t open Android Auto</string>
     <string name="restart_auto">Restart Auto</string>
+    <string name="hook_status">Hook status</string>
+    <string name="hook_status_waiting">Waiting for Android Auto to report</string>
+    <string name="hook_status_counts">%1$d ready · %2$d failed</string>
+    <string name="hook_status_counts_off">%1$d ready · %2$d off · %3$d failed</string>
+    <string name="hook_status_module">AA Mods %1$s · Android Auto %2$s</string>
+    <string name="hook_status_reported">Reported %1$s · %2$s</string>
+    <string name="hook_status_main">main</string>
+    <string name="hook_status_ready_group">Ready (%1$d)</string>
+    <string name="hook_status_failed_group">Failed (%1$d)</string>
+    <string name="hook_status_off_group">Off (%1$d)</string>
+    <string name="hook_status_ready">Ready</string>
+    <string name="hook_status_failed">Failed</string>
+    <string name="hook_status_off">Off</string>
+    <string name="hook_status_installed">Installed; waiting for Android Auto to use it</string>
+    <plurals name="hook_status_used">
+        <item quantity="one">Used %1$d time this run</item>
+        <item quantity="other">Used %1$d times this run</item>
+    </plurals>
+    <string name="hook_status_explanation">A failed hook no longer matches this Android Auto build. A ready hook is installed, and a counter appears once it has done its work.</string>
+    <string name="hook_status_no_report">No report yet</string>
+    <string name="hook_status_no_report_body">Android Auto hasn\'t reported its hooks for this Android Auto and AA Mods version yet. Use Open Auto on the settings screen, give Android Auto a few seconds, then come back here.</string>
+
     <string name="restart_aa">Restart Android Auto</string>
     <string name="restart_aa_done">Android Auto restarted</string>
     <string name="restart_aa_failed">Needs root: allow AA Mods in your root manager</string>

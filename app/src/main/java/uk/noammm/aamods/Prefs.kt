@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
+import org.json.JSONArray
+import org.json.JSONObject
 
 // Shared between the settings screen (writes) and the hooks inside Android Auto (reads). The hooks read
 // the settings either from the module's own file through XSharedPreferences, which only works where the
@@ -100,6 +102,62 @@ object AppState {
     // The AA Mods version the module last reported running inside Android Auto with, and when
     const val LOADED_VERSION = "loaded_version"
     const val LOADED_AT = "loaded_at"
+    // One hook report per Android Auto process, keyed by its process name
+    const val STATUS_PREFIX = "status_"
+
+    // The newest hook report: the projection process's when it has one, otherwise the newest. Android
+    // Auto loads the module into several processes, and the projection one is the screen's. Hooks that
+    // did work in another process keep that count, and a failure in any process outranks a ready state.
+    fun status(context: Context): JSONObject? {
+        val state = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        val installed = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+        }.getOrDefault(0L)
+        // A report from an older module or Android Auto build says nothing about this one, so the screen
+        // waits for the fresh report instead of showing stale green rows after an update
+        val androidAuto = runCatching {
+            context.packageManager.getPackageInfo(Entry.GEARHEAD, 0).versionName.orEmpty()
+        }.getOrDefault("")
+        val reports = state.all.entries.mapNotNull { entry ->
+            if (!entry.key.startsWith(STATUS_PREFIX)) return@mapNotNull null
+            val report = (entry.value as? String)
+                ?.let { text -> runCatching { JSONObject(text) }.getOrNull() } ?: return@mapNotNull null
+            if (report.optLong("at") < installed) return@mapNotNull null
+            if (androidAuto.isNotEmpty() && report.optString("androidAuto").let { it.isNotEmpty() && it != androidAuto }) {
+                return@mapNotNull null
+            }
+            report
+        }
+        if (reports.isEmpty()) return null
+        val base = reports.firstOrNull { it.optString("process").endsWith(":projection") }
+            ?: reports.firstOrNull { it.optString("process") == Entry.GEARHEAD }
+            ?: reports.maxByOrNull { it.optLong("at") } ?: return null
+        val merged = JSONArray()
+        val byName = LinkedHashMap<String, JSONObject>()
+        for (report in reports) {
+            val hooks = report.optJSONArray("hooks") ?: continue
+            for (i in 0 until hooks.length()) {
+                val hook = runCatching { hooks.getJSONObject(i) }.getOrNull() ?: continue
+                val name = hook.optString("name")
+                val known = byName[name]
+                if (known == null) {
+                    byName[name] = JSONObject(hook.toString())
+                } else {
+                    known.put("used", maxOf(known.optInt("used"), hook.optInt("used")))
+                    if (hook.optString("state") == Status.READY && known.optString("detail").isEmpty()) {
+                        known.put("detail", hook.optString("detail"))
+                    }
+                    if (hook.optString("state") == Status.FAILED) {
+                        known.put("state", Status.FAILED)
+                        known.put("detail", hook.optString("detail"))
+                    }
+                }
+            }
+        }
+        for (hook in byName.values) merged.put(hook)
+        base.put("hooks", merged)
+        return base
+    }
 
     // Whether the hooks reported running inside Android Auto with this version since it was installed.
     // Reaching Android Auto means the module is on in the framework and in Android Auto's scope, which

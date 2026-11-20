@@ -85,35 +85,39 @@ class Entry : IXposedHookLoadPackage {
 
         safely("flags") { hookFlags() }
         safely("phone screen") { hookPhoneScreen() }
-        if (lpparam.processName.endsWith(":provider")) safely("report") { reportLoaded() }
+        if (lpparam.processName.endsWith(":provider")) safely("report", track = false) { reportLoaded() }
         safely("phone screen on USB changes") { keepPhoneScreenOnUsbChanges() }
-        if (Prefs.on(prefs, Prefs.NO_LOCKOUTS)) safely("lockouts") { hookDrivingStatus() }
-        if (Prefs.on(prefs, Prefs.NO_FORCED_APPS)) safely("forced apps") { hookForcedApps() }
-        if (Prefs.on(prefs, Prefs.ANY_CAR_APP)) safely("app allowlist") { hookAppAllowlist() }
-        if (Prefs.on(prefs, Prefs.NO_TELEMETRY)) safely("telemetry binds") { hookTelemetryBinds() }
-        if (Prefs.on(prefs, Prefs.MICROG)) safely("microG") { hookMicroG() }
+        if (Prefs.on(prefs, Prefs.NO_LOCKOUTS)) safely("lockouts") { hookDrivingStatus() } else Status.off("lockouts")
+        if (Prefs.on(prefs, Prefs.NO_FORCED_APPS)) safely("forced apps") { hookForcedApps() } else Status.off("forced apps")
+        if (Prefs.on(prefs, Prefs.ANY_CAR_APP)) safely("app allowlist") { hookAppAllowlist() } else Status.off("app allowlist")
+        if (Prefs.on(prefs, Prefs.NO_TELEMETRY)) safely("telemetry binds") { hookTelemetryBinds() } else Status.off("telemetry binds")
+        if (Prefs.on(prefs, Prefs.MICROG)) safely("microG") { hookMicroG() } else Status.off("microG")
         if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) {
             safely("launcher tabs") { hookLauncherTabs() }
             safely("phone app rail") { keepRailBesidePhoneApps() }
+        } else {
+            Status.off("launcher tabs")
+            Status.off("phone app rail")
         }
         val scale = prefs.getInt(Prefs.PHONE_APP_SCALE, 100)
-        if (scale != 100) safely("phone app size") { hookPhoneAppDensity(scale) }
+        if (scale != 100) safely("phone app size") { hookPhoneAppDensity(scale) } else Status.off("phone app size")
         val pinned = prefs.getString(Prefs.PINNED_APPS, "").orEmpty().split(',').filter { it.isNotEmpty() }
-        if (pinned.isNotEmpty()) safely("pinned apps") { hookPinnedApps(pinned) }
+        if (pinned.isNotEmpty()) safely("pinned apps") { hookPinnedApps(pinned) } else Status.off("pinned apps")
         if (onlyOpenApps()) safely("open apps") {
             trackOpenApps()
             dashboardShowsOnlyOpenApps()
-        }
-        if (Prefs.on(prefs, Prefs.START_ON_LAUNCHER)) safely("start on launcher") { hookStartOnLauncher() }
-        if (Prefs.on(prefs, Prefs.RECENTS)) safely("recents") { hookRecents() }
-        if (Prefs.on(prefs, Prefs.LIGHTER)) safely("frame rate") { hookFrameRate() }
+        } else Status.off("open apps")
+        if (Prefs.on(prefs, Prefs.START_ON_LAUNCHER)) safely("start on launcher") { hookStartOnLauncher() } else Status.off("start on launcher")
+        if (Prefs.on(prefs, Prefs.RECENTS)) safely("recents") { hookRecents() } else Status.off("recents")
+        if (Prefs.on(prefs, Prefs.LIGHTER)) safely("frame rate") { hookFrameRate() } else Status.off("frame rate")
         val resolution = prefs.getString(Prefs.VIDEO_RESOLUTION, "").orEmpty()
-        if (resolution.isNotEmpty()) safely("resolution") { hookResolution(resolution) }
-        if (Prefs.on(prefs, Prefs.HIDE_NEWS_WEATHER)) safely("assistant tiles") { hookAssistantTiles() }
+        if (resolution.isNotEmpty()) safely("resolution") { hookResolution(resolution) } else Status.off("resolution")
+        if (Prefs.on(prefs, Prefs.HIDE_NEWS_WEATHER)) safely("assistant tiles") { hookAssistantTiles() } else Status.off("assistant tiles")
         safely("default apps") { hookDefaultApps() }
-        if (Prefs.on(prefs, Prefs.MUTE_NOTIFICATIONS)) safely("notifications") { hookNotifications() }
+        if (Prefs.on(prefs, Prefs.MUTE_NOTIFICATIONS)) safely("notifications") { hookNotifications() } else Status.off("notifications")
         // The dex index is only needed while hooks are being installed
-        safely("dex") { dex.close() }
+        safely("dex", track = false) { dex.close() }
+        reportStatus(lpparam.processName)
     }
 
     // Every Phenotype flag is read through one handle base class (xgr in 18.2), whose b field holds the
@@ -123,7 +127,10 @@ class Entry : IXposedHookLoadPackage {
     private fun hookFlags() {
         val overrides = flagOverrides()
         val allowAll = if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) setOf(PHONE_APPS_FILTER) else emptySet()
-        if (overrides.isEmpty() && allowAll.isEmpty()) return
+        if (overrides.isEmpty() && allowAll.isEmpty()) {
+            Status.off("flags", "No overrides set")
+            return
+        }
         flagNames = overrides.keys + allowAll
         val hook = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
@@ -168,6 +175,7 @@ class Entry : IXposedHookLoadPackage {
         resolver?.let { XposedBridge.hookMethod(it, hook) }
         log("overriding ${overrides.size + allowAll.size} flags through $getters getters" +
             (resolver?.let { " and ${it.name}" } ?: ""))
+        Status.installed("flags", "${overrides.size + allowAll.size} flags overridden")
     }
 
     // The package list flag's value is Android Auto's own proto for it, so an allow-all answer is built from
@@ -317,6 +325,7 @@ class Entry : IXposedHookLoadPackage {
                 paramTypes("com.google.android.gms.car.CarSensorEvent")
                 returnType("void")
             }
+            if (found.isEmpty()) error("no driving status client senders")
             for (method in found) XposedBridge.hookMethod(method, sent)
             log("driving status: ${found.size} client senders by dex")
         } else {
@@ -345,6 +354,7 @@ class Entry : IXposedHookLoadPackage {
                 paramTypes("int")
                 returnType("com.google.android.gms.car.CarSensorEvent")
             }
+            if (found.isEmpty()) error("no driving status event builders")
             for (method in found) XposedBridge.hookMethod(method, built)
             log("driving status: ${found.size} event builders by dex")
         } else {
@@ -649,6 +659,13 @@ class Entry : IXposedHookLoadPackage {
     private val logged = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
 
     private fun logOnce(msg: String) {
+        // Count every use, not just the first one the log keeps for readability
+        when {
+            msg.startsWith("flag:") -> Status.used("flags")
+            msg.startsWith("microG:") -> Status.used("microG")
+            msg.startsWith("telemetry:") -> Status.used("telemetry binds")
+            msg.startsWith("phone screen:") -> Status.used("phone screen")
+        }
         if (logged.add(msg)) log(msg)
     }
 
@@ -863,6 +880,7 @@ class Entry : IXposedHookLoadPackage {
         }
         if (apply == null) {
             log("frame rate: MediaFormat capped at $FRAME_RATE_CAP, no setFrameRateRestriction hook")
+            Status.installed("frame rate", "MediaFormat only")
             return
         }
         XposedBridge.hookMethod(apply, object : XC_MethodHook() {
@@ -871,6 +889,7 @@ class Entry : IXposedHookLoadPackage {
             }
         })
         log("frame rate: MediaFormat and setFrameRateRestriction capped at $FRAME_RATE_CAP")
+        Status.installed("frame rate", "MediaFormat and setFrameRateRestriction")
     }
 
     // Android Auto's own developer setting "Video resolution" (car_video_resolution in its carservice prefs) limits
@@ -882,6 +901,7 @@ class Entry : IXposedHookLoadPackage {
     private fun hookResolution(resolution: String) {
         if (resolution !in RESOLUTION_SIZES) {
             log("resolution: $resolution is not a size Android Auto knows")
+            Status.failed("resolution", IllegalArgumentException("$resolution is not a size Android Auto knows"))
             return
         }
         XposedHelpers.findAndHookMethod("android.app.SharedPreferencesImpl", cl, "getString", String::class.java, String::class.java, object : XC_MethodHook() {
@@ -890,6 +910,7 @@ class Entry : IXposedHookLoadPackage {
             }
         })
         log("resolution: answering $resolution")
+        Status.installed("resolution", resolution)
     }
 
     // Start on launcher and recents both show only the apps the user opened
@@ -1213,7 +1234,7 @@ class Entry : IXposedHookLoadPackage {
         }
         context.sendBroadcast(Intent(ACTION_CLOSE).setPackage(GEARHEAD).putExtra(EXTRA_COMPONENT, carScreen))
         if (app.packageName != GEARHEAD) Thread {
-            safely("stop app") { context.contentResolver.call(AndroidAutoBridge.URI, AndroidAutoBridge.STOP_APP, app.packageName, null) }
+            safely("stop app", track = false) { context.contentResolver.call(AndroidAutoBridge.URI, AndroidAutoBridge.STOP_APP, app.packageName, null) }
         }.start()
     }
 
@@ -1296,7 +1317,7 @@ class Entry : IXposedHookLoadPackage {
                     override fun onReceive(c: Context, intent: Intent) {
                         @Suppress("DEPRECATION")
                         val app = intent.getParcelableExtra<ComponentName>(EXTRA_COMPONENT) ?: return
-                        safely("close app") { finishCarScreens(carActivities ?: return@safely, app) }
+                        safely("close app", track = false) { finishCarScreens(carActivities ?: return@safely, app) }
                     }
                 }
                 if (Build.VERSION.SDK_INT >= 33) {
@@ -1390,8 +1411,31 @@ class Entry : IXposedHookLoadPackage {
             Thread.sleep(100)
             app = AndroidAppHelper.currentApplication()
         }
-        app?.let { safely("report") { it.contentResolver.call(AndroidAutoBridge.URI, AndroidAutoBridge.LOADED, BuildConfig.VERSION_NAME, null) } }
+        app?.let { safely("report", track = false) { it.contentResolver.call(AndroidAutoBridge.URI, AndroidAutoBridge.LOADED, BuildConfig.VERSION_NAME, null) } }
     }.start()
+
+    // Sends the hook results to AA Mods' status screen: once when they're installed, then again after a
+    // start-up wait so the hooks that have already done something show their counters too.
+    private fun reportStatus(processName: String) = Thread {
+        val deadline = SystemClock.elapsedRealtime() + 15_000
+        var app = AndroidAppHelper.currentApplication()
+        while (app == null && SystemClock.elapsedRealtime() < deadline) {
+            Thread.sleep(100)
+            app = AndroidAppHelper.currentApplication()
+        }
+        val context = app ?: return@Thread
+        val version = try {
+            context.packageManager.getPackageInfo(GEARHEAD, 0).versionName.orEmpty()
+        } catch (_: Throwable) {
+            ""
+        }
+        fun send() = safely("status", track = false) {
+            context.contentResolver.call(AndroidAutoBridge.URI, AndroidAutoBridge.STATUS, Status.report(processName, version), null)
+        }
+        send()
+        Thread.sleep(20_000)
+        send()
+    }.apply { isDaemon = true }.start()
 
     // Takes the phone screen's end of its link from AA Mods and pipes it to the head unit server. The server starts a
     // moment after it's asked to, so a refused connection is retried. Nothing else is: Android Auto parks every
@@ -1492,6 +1536,7 @@ class Entry : IXposedHookLoadPackage {
             }
         })
         log("phone app size: ${density.name} scaled to $percent%")
+        Status.installed("phone app size", "$percent%")
     }
 
     // nts.a builds every launcher tab's grid from its app list (nuf, whose a.c.a() is the component: nuf.a is the app
@@ -1509,6 +1554,7 @@ class Entry : IXposedHookLoadPackage {
             }
         })
         log("pinned apps: nts.a orders ${pinned.size} pinned packages first")
+        Status.installed("pinned apps", "${pinned.size} package${if (pinned.size == 1) "" else "s"} pinned")
     }
 
     // ntw.e builds the launcher's Google Assistant shortcut tiles; each is keyed by a fake component package.
@@ -1537,7 +1583,10 @@ class Entry : IXposedHookLoadPackage {
         val chosen = mapOf(1 to Prefs.DEFAULT_NAV, 3 to Prefs.DEFAULT_MEDIA)
             .mapValues { ComponentName.unflattenFromString(prefs.getString(it.value, "").orEmpty()) }
             .filterValues { it != null }
-        if (chosen.isEmpty()) return
+        if (chosen.isEmpty()) {
+            Status.off("default apps", "No default apps set")
+            return
+        }
         val hook = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 chosen[XposedHelpers.getIntField(param.args[0], "h")]?.let { param.result = it }
@@ -1657,10 +1706,12 @@ class Entry : IXposedHookLoadPackage {
         }
     }
 
-    private fun safely(what: String, block: () -> Unit) {
+    private fun safely(what: String, track: Boolean = true, block: () -> Unit) {
         try {
             block()
+            if (track) Status.installed(what)
         } catch (t: Throwable) {
+            if (track) Status.failed(what, t)
             log("$what hook failed: $t\n${Log.getStackTraceString(t)}")
         }
     }

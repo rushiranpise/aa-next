@@ -7,11 +7,13 @@ import android.net.Uri
 import android.os.Binder
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import org.json.JSONObject
 import java.io.FileNotFoundException
 
 // What the module asks of AA Mods from inside Android Auto, and only Android Auto may: the phone screen's link
 // (see PhoneScreen), the settings to run with (Prefs, the one settings channel that needs nothing from the
-// framework), stopping an app closed from the recents screen, and reporting it runs there (WelcomeActivity)
+// framework), stopping an app closed from the recents screen, and reporting it runs there (WelcomeActivity) and
+// how its hooks installed (Status)
 class AndroidAutoBridge : ContentProvider() {
     // Returned as a file, the link is closed here once sent, so either side closing its end ends the other's reads
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
@@ -32,6 +34,15 @@ class AndroidAutoBridge : ContentProvider() {
                 .commit()
         }
         if (method == PREFS) return Prefs.bundle(context!!.getSharedPreferences(Prefs.FILE, Context.MODE_PRIVATE))
+        if (method == STATUS && arg != null) {
+            val report = runCatching { JSONObject(arg) }.getOrNull()
+            val process = report?.optString("process").orEmpty()
+            if (process.isNotEmpty()) {
+                context!!.getSharedPreferences(AppState.FILE, Context.MODE_PRIVATE).edit()
+                    .putString(AppState.STATUS_PREFIX + process, arg)
+                    .commit()
+            }
+        }
         if (method == STOP_APP && arg != null && arg.matches(PACKAGE_NAME) && arg != Entry.GEARHEAD && arg != BuildConfig.APPLICATION_ID) {
             Thread { runAsRoot("am stop-app $arg || am kill $arg") }.start()
         }
@@ -61,6 +72,7 @@ class AndroidAutoBridge : ContentProvider() {
         const val STOP_APP = "stop_app"
         const val LOADED = "loaded"
         const val PREFS = "prefs"
+        const val STATUS = "status"
         private val PACKAGE_NAME = Regex("[A-Za-z0-9_.]+")
     }
 }

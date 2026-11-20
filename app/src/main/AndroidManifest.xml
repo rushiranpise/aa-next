@@ -70,6 +70,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".StatusActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="true">
             <intent-filter>
