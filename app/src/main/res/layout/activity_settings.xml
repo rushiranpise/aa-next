@@ -12,19 +12,19 @@
         android:fitsSystemWindows="true">
 
         <com.google.android.material.appbar.CollapsingToolbarLayout
+            android:id="@+id/collapsing"
             style="?attr/collapsingToolbarLayoutLargeStyle"
             android:layout_width="match_parent"
             android:layout_height="?attr/collapsingToolbarLayoutLargeSize"
             app:collapsedTitleTextAppearance="?attr/textAppearanceTitleLargeEmphasized"
-            app:expandedTitleTextAppearance="?attr/textAppearanceHeadlineMediumEmphasized"
+            app:expandedTitleTextAppearance="?attr/textAppearanceDisplaySmallEmphasized"
             app:layout_scrollFlags="scroll|exitUntilCollapsed|snap">
 
             <com.google.android.material.appbar.MaterialToolbar
                 android:layout_width="match_parent"
                 android:layout_height="?attr/actionBarSize"
                 android:elevation="0dp"
-                app:layout_collapseMode="pin"
-                app:title="@string/app_name" />
+                app:layout_collapseMode="pin" />
         </com.google.android.material.appbar.CollapsingToolbarLayout>
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -33,7 +33,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
-        android:paddingBottom="104dp"
+        android:paddingBottom="24dp"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <LinearLayout
@@ -114,11 +114,9 @@
             android:insetBottom="0dp"
             android:text="@string/open_auto"
             android:textAppearance="?attr/textAppearanceLabelLargeEmphasized"
-            android:textColor="@color/action_open_foreground"
-            app:backgroundTint="@color/action_open_background"
             app:icon="@drawable/ic_directions_car"
             app:iconGravity="textStart"
-            app:iconTint="@color/action_open_foreground" />
+            app:iconTint="?attr/colorOnPrimary" />
 
         <Space
             android:layout_width="12dp"
@@ -126,7 +124,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/restart_action"
-            style="?attr/materialButtonStyle"
+            style="?attr/materialButtonTonalStyle"
             android:layout_width="0dp"
             android:layout_height="56dp"
             android:layout_weight="1"
@@ -134,10 +132,8 @@
             android:insetBottom="0dp"
             android:text="@string/restart_auto"
             android:textAppearance="?attr/textAppearanceLabelLargeEmphasized"
-            android:textColor="@color/action_restart_foreground"
-            app:backgroundTint="@color/action_restart_background"
             app:icon="@drawable/ic_restart_alt"
             app:iconGravity="textStart"
-            app:iconTint="@color/action_restart_foreground" />
+            app:iconTint="?attr/colorOnSecondaryContainer" />
     </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

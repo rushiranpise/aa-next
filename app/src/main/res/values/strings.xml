@@ -152,4 +152,52 @@
     <string name="restart_aa">Restart Android Auto</string>
     <string name="restart_aa_done">Android Auto restarted</string>
     <string name="restart_aa_failed">Needs root: allow AA Mods in your root manager</string>
+
+    <!-- The home screen and its category screens. Each category is one screen, and the home card says what
+         is inside it without repeating the whole screen title. -->
+    <string name="home_settings">Settings</string>
+    <plurals name="settings_count">
+        <item quantity="one">%1$d setting</item>
+        <item quantity="other">%1$d settings</item>
+    </plurals>
+
+    <string name="category_driving">Driving</string>
+    <string name="category_driving_summary">Keep the screen usable</string>
+    <string name="category_driving_body">Keep Android Auto’s lists and keyboard usable while the car is moving.</string>
+    <string name="category_apps">Apps &amp; launcher</string>
+    <string name="category_apps_summary">Pins, recents and defaults</string>
+    <string name="category_apps_body">Choose what appears on the car screen, which apps Android Auto opens, and which phone apps it can reach.</string>
+    <string name="category_notifications">Notifications</string>
+    <string name="category_notifications_summary">Mute and timeout</string>
+    <string name="category_notifications_body">Decide which alerts reach the car screen and how long they stay there.</string>
+    <string name="category_screen">Car screen</string>
+    <string name="category_screen_summary">Phone screen and performance</string>
+    <string name="category_screen_body">Show Android Auto on this phone itself, and tune how much it draws and at what resolution.</string>
+    <string name="category_system">System</string>
+    <string name="category_system_summary">Privacy, microG and flags</string>
+    <string name="category_system_body">Privacy, the microG replacement for Play Services, and Android Auto’s advanced flag overrides.</string>
+    <string name="category_custom">Customization</string>
+    <string name="category_custom_summary">The hidden web app</string>
+    <string name="category_custom_body">Android Auto’s hidden UX Prototype screen, and the page it opens.</string>
+    <string name="category_about">About</string>
+    <string name="category_about_summary">Version and updates</string>
+    <string name="category_about_body">Version, updates and the last hook report from inside Android Auto.</string>
+
+    <string name="group_driver_access">Driver access</string>
+    <string name="group_phone_apps">Phone apps</string>
+    <string name="group_launcher">Launcher</string>
+    <string name="group_compatibility">Compatibility</string>
+    <string name="group_defaults">Defaults</string>
+    <string name="group_alerts">Alerts</string>
+    <string name="group_on_screen">On screen</string>
+    <string name="group_phone_screen">Phone screen</string>
+    <string name="group_performance">Performance</string>
+    <string name="group_privacy">Privacy</string>
+    <string name="group_microg">microG</string>
+    <string name="group_advanced">Advanced</string>
+    <string name="group_prototype">UX Prototype</string>
+    <string name="group_app">App</string>
+    <string name="group_module">Module</string>
+    <string name="about_status_summary">What is working, off or failed</string>
+    <string name="update_banner_summary">Tap to update</string>
 </resources>
