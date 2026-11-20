@@ -171,11 +171,6 @@
         <item quantity="one">%1$d hook needs attention</item>
         <item quantity="other">%1$d hooks need attention</item>
     </plurals>
-    <string name="hook_status_hint">Open Auto, then come back for the report</string>
-    <string name="hook_status_counts_off">%1$d ready · %2$d off · %3$d failed</string>
-    <string name="hook_status_module">AA Next %1$s · Android Auto %2$s</string>
-    <string name="hook_status_reported">Reported %1$s · %2$s</string>
-    <string name="hook_status_main">main</string>
     <string name="hook_status_ready_group">Ready (%1$d)</string>
     <string name="hook_status_failed_group">Failed (%1$d)</string>
     <string name="hook_status_off_group">Off (%1$d)</string>
@@ -187,7 +182,6 @@
         <item quantity="one">Used %1$d time this run</item>
         <item quantity="other">Used %1$d times this run</item>
     </plurals>
-    <string name="hook_status_explanation">A failed hook no longer matches this Android Auto build. A ready hook is installed, and a counter appears once it has done its work.</string>
     <string name="hook_status_no_report">No report yet</string>
     <string name="hook_status_no_report_body">Android Auto hasn\'t reported its hooks for this Android Auto and AA Next version yet. Use Open Auto on the settings screen, give Android Auto a few seconds, then come back here.</string>
 

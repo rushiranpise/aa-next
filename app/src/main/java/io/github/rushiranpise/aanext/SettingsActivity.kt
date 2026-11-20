@@ -25,7 +25,6 @@ class SettingsActivity : SettingsScreen() {
     private lateinit var statusReady: TextView
     private lateinit var statusOff: TextView
     private lateinit var statusFailed: TextView
-    private lateinit var statusMeta: TextView
     private lateinit var statusProgress: LinearProgressIndicator
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,7 +69,6 @@ class SettingsActivity : SettingsScreen() {
         statusReady = statusRow.findViewById(R.id.status_ready)
         statusOff = statusRow.findViewById(R.id.status_off)
         statusFailed = statusRow.findViewById(R.id.status_failed)
-        statusMeta = statusRow.findViewById(R.id.status_meta)
         statusProgress = statusRow.findViewById(R.id.status_progress)
         refreshStatus()
 
@@ -80,50 +78,35 @@ class SettingsActivity : SettingsScreen() {
         }
 
         label(R.string.home_settings)
-        featured(Category.APPS)
-        categoryRow(Category.DRIVING, Category.NOTIFICATIONS)
-        categoryRow(Category.SCREEN, Category.SYSTEM)
-        categoryRow(Category.CUSTOM, Category.ABOUT)
+        listOf(
+            Category.APPS,
+            Category.DRIVING,
+            Category.NOTIFICATIONS,
+            Category.SCREEN,
+            Category.SYSTEM,
+            Category.CUSTOM,
+            Category.ABOUT,
+        ).forEach(::categoryItem)
 
         checkForUpdates(offer = savedInstanceState == null)
     }
 
-    private fun featured(category: Category) {
-        val card = layoutInflater.inflate(R.layout.item_category_featured, content, false)
-        bind(card, category, featured = true)
-        content.addView(card, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = 12.dp
-        })
-    }
-
-    // Two cards share a row; both are the same height because every card has the same lines of text
-    private fun categoryRow(vararg categories: Category) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            isBaselineAligned = false
-        }
-        categories.forEachIndexed { index, category ->
-            val card = layoutInflater.inflate(R.layout.item_category, row, false)
-            bind(card, category)
-            val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            if (index > 0) params.marginStart = 12.dp
-            row.addView(card, params)
-        }
+    // One row per category, like an app launcher: icon, name, summary and count in a capsule
+    private fun categoryItem(category: Category) {
+        val row = layoutInflater.inflate(R.layout.item_category, content, false)
+        bind(row, category)
         content.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = 12.dp
+            topMargin = 8.dp
         })
     }
 
-    private fun bind(card: View, category: Category, featured: Boolean = false) {
+    private fun bind(card: View, category: Category) {
         card.findViewById<ImageView>(R.id.icon).apply {
             setImageResource(category.icon)
-            // The featured card already has its own tertiary tile inside a tertiary card
-            if (!featured) imageTintList = ColorStateList.valueOf(MaterialColors.getColor(card, category.onContainer))
+            imageTintList = ColorStateList.valueOf(MaterialColors.getColor(card, category.onContainer))
         }
-        if (!featured) {
-            card.findViewById<MaterialCardView>(R.id.tile)
-                .setCardBackgroundColor(MaterialColors.getColor(card, category.container))
-        }
+        card.findViewById<MaterialCardView>(R.id.tile)
+            .setCardBackgroundColor(MaterialColors.getColor(card, category.container))
         card.findViewById<TextView>(R.id.title).setText(category.title)
         card.findViewById<TextView>(R.id.summary).setText(category.summary)
         card.findViewById<TextView>(R.id.count).text = count(category)
@@ -150,7 +133,6 @@ class SettingsActivity : SettingsScreen() {
             statusFailed.setTextColor(onContainer)
             statusSummary.setTextColor(onContainer)
             statusSummary.setText(R.string.hook_status_waiting)
-            statusMeta.setText(R.string.hook_status_hint)
             statusProgress.isVisible = false
             return
         }
@@ -183,11 +165,6 @@ class SettingsActivity : SettingsScreen() {
             ready > 0 -> getString(R.string.hook_status_all_good)
             else -> getString(R.string.hook_status_waiting)
         }
-        statusMeta.text = getString(
-            R.string.hook_status_module,
-            report.optString("module"),
-            report.optString("androidAuto").ifEmpty { "Android Auto" },
-        )
         val total = ready + off + failed
         statusProgress.isVisible = total > 0
         if (total > 0) {

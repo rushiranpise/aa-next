@@ -1,25 +1,18 @@
 package io.github.rushiranpise.aanext
 
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Bundle
-import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
-import androidx.core.widget.NestedScrollView
 import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.card.MaterialCardView
-import com.google.android.material.color.MaterialColors
 import io.github.rushiranpise.aanext.headunit.HeadUnitActivity
 
-// One category per screen: a large header, then its groups. The rows are the same builders the home uses
-// (SettingsScreen), so moving a setting here never changes what it does.
+// One category per screen: its name in the app bar, then its description and groups. The rows are the
+// same builders the home uses (SettingsScreen), so moving a setting here never changes what it does.
 class CategoryActivity : SettingsScreen() {
     private lateinit var category: Category
     private lateinit var toolbar: MaterialToolbar
-    private var titleGone = Int.MAX_VALUE
     private var flagsSummary: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,13 +25,8 @@ class CategoryActivity : SettingsScreen() {
         prepare(R.id.content, R.id.actions)
         toolbar = findViewById(R.id.toolbar)
         toolbar.setNavigationOnClickListener { finish() }
-        // The large header names the screen at the top; once it scrolls under the toolbar, the toolbar
-        // takes the name over so it is never lost
-        findViewById<NestedScrollView>(R.id.scroll).setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            val shown = scrollY >= titleGone
-            if (shown && toolbar.title != getString(category.title)) toolbar.setTitle(category.title)
-            if (!shown && toolbar.title != getString(R.string.app_name)) toolbar.setTitle(R.string.app_name)
-        }
+        // The app bar names the screen; the header below keeps only the description
+        toolbar.title = getString(category.title)
         header()
         when (category) {
             Category.DRIVING -> driving()
@@ -54,18 +42,8 @@ class CategoryActivity : SettingsScreen() {
 
     private fun header() {
         val view = layoutInflater.inflate(R.layout.item_category_header, content, false)
-        view.findViewById<ImageView>(R.id.icon).apply {
-            setImageResource(category.icon)
-            imageTintList = ColorStateList.valueOf(MaterialColors.getColor(view, category.onContainer))
-        }
-        view.findViewById<MaterialCardView>(R.id.tile)
-            .setCardBackgroundColor(MaterialColors.getColor(view, category.container))
-        val title = view.findViewById<TextView>(R.id.title)
-        title.setText(category.title)
         view.findViewById<TextView>(R.id.summary).setText(category.body)
         content.addView(view)
-        // The point where the header title is hidden behind the app bar
-        view.post { titleGone = title.bottom }
     }
 
     private fun driving() {

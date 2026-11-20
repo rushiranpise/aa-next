@@ -17,7 +17,6 @@ import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.isVisible
-import androidx.core.widget.NestedScrollView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -40,7 +39,6 @@ class FlagsActivity : SettingsScreen() {
     private lateinit var empty: TextView
     private lateinit var query: TextInputEditText
     private lateinit var resetRow: View
-    private var titleGone = Int.MAX_VALUE
     private var needle = ""
     private var modifiedOnly = false
 
@@ -64,13 +62,8 @@ class FlagsActivity : SettingsScreen() {
 
         toolbar = findViewById(R.id.toolbar)
         toolbar.setNavigationOnClickListener { finish() }
-        // Same takeover as the category screens: the large header names the screen, and the toolbar
-        // takes the name over once the header has scrolled away
-        findViewById<NestedScrollView>(R.id.scroll).setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            val shown = scrollY >= titleGone
-            if (shown && toolbar.title != getString(R.string.flags_title)) toolbar.setTitle(R.string.flags_title)
-            if (!shown && toolbar.title != getString(R.string.app_name)) toolbar.setTitle(R.string.app_name)
-        }
+        // Same header as the category screens: the app bar names the screen, the header keeps the description
+        toolbar.title = getString(R.string.flags_title)
 
         header()
         search()
@@ -102,17 +95,8 @@ class FlagsActivity : SettingsScreen() {
 
     private fun header() {
         val view = layoutInflater.inflate(R.layout.item_category_header, content, false)
-        view.findViewById<ImageView>(R.id.icon).apply {
-            setImageResource(R.drawable.ic_flag)
-            imageTintList = ColorStateList.valueOf(MaterialColors.getColor(view, rowOnContainer))
-        }
-        view.findViewById<MaterialCardView>(R.id.tile)
-            .setCardBackgroundColor(MaterialColors.getColor(view, rowContainer))
-        val title = view.findViewById<TextView>(R.id.title)
-        title.setText(R.string.flags_title)
         view.findViewById<TextView>(R.id.summary).setText(R.string.flags_body)
         content.addView(view)
-        view.post { titleGone = title.bottom }
     }
 
     private fun search() {

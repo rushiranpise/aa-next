@@ -29,8 +29,8 @@ enum class Category(
         R.string.category_apps_body,
         R.drawable.ic_apps,
         10,
-        com.google.android.material.R.attr.colorTertiaryContainer,
-        com.google.android.material.R.attr.colorOnTertiaryContainer,
+        com.google.android.material.R.attr.colorSecondaryContainer,
+        com.google.android.material.R.attr.colorOnSecondaryContainer,
     ),
     NOTIFICATIONS(
         R.string.category_notifications,
@@ -47,8 +47,8 @@ enum class Category(
         R.string.category_screen_body,
         R.drawable.ic_smartphone,
         3,
-        com.google.android.material.R.attr.colorTertiaryContainer,
-        com.google.android.material.R.attr.colorOnTertiaryContainer,
+        com.google.android.material.R.attr.colorPrimaryContainer,
+        com.google.android.material.R.attr.colorOnPrimaryContainer,
     ),
     SYSTEM(
         R.string.category_system,
