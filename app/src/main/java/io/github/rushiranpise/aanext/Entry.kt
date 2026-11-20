@@ -1,5 +1,6 @@
 package io.github.rushiranpise.aanext
 
+import android.annotation.SuppressLint
 import android.app.AndroidAppHelper
 import android.content.BroadcastReceiver
 import android.content.ComponentName
@@ -606,9 +607,16 @@ class Entry : IXposedHookLoadPackage {
     }
 
     private fun signedWithKeyMicroGMisses(context: Context, pkg: String): Boolean = try {
-        val info = context.packageManager.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
+        // SigningInfo arrived in Android 9; before that the (deprecated) signatures list is all there is
+        val signatures = if (Build.VERSION.SDK_INT >= 28) {
+            val info = context.packageManager.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
+            info.signingInfo?.apkContentsSigners.orEmpty()
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(pkg, PackageManager.GET_SIGNATURES).signatures.orEmpty()
+        }
         val sha1 = java.security.MessageDigest.getInstance("SHA-1")
-        info.signingInfo?.apkContentsSigners.orEmpty().any {
+        signatures.any {
             sha1.digest(it.toByteArray()).joinToString("") { b -> "%02x".format(b) } in GOOGLE_KEYS_MICROG_MISSES
         }
     } catch (_: PackageManager.NameNotFoundException) {
@@ -1352,6 +1360,8 @@ class Entry : IXposedHookLoadPackage {
     // jme, the car activity manager of each car connection (17.6 ioh), lives in :car. The recents screen asks it to
     // close an app with a broadcast only Android Auto itself can send: a not-exported receiver, or before Android 13
     // Android Auto's own signature permission for exactly that.
+    // Not exported either way: API 33+ says so with a flag, older versions with a permission
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private fun closeReceiver() {
         XposedBridge.hookAllConstructors(XposedHelpers.findClass("jme", cl), object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
@@ -1397,6 +1407,9 @@ class Entry : IXposedHookLoadPackage {
     private fun moduleContext(context: Context) =
         module ?: context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY).also { module = it }
 
+    // opPackageName arrived in Android 10; the package name answers the same question before that
+    private fun Context.callerName() = if (Build.VERSION.SDK_INT >= 29) opPackageName else packageName
+
     // How the settings reach the hooks. XSharedPreferences reads the module's own file, which works only
     // where the framework injects the module into its own app and shares that file (Vector does). LSPosed
     // injects only the apps in a module's scope and never the module itself, so its shared file stays
@@ -1411,7 +1424,7 @@ class Entry : IXposedHookLoadPackage {
             context?.contentResolver?.call(AndroidAutoBridge.URI, AndroidAutoBridge.PREFS, null, null)
                 ?.let { Prefs.FromBridge(it) } ?: Prefs.empty
         } catch (t: Throwable) {
-            log("bridge prefs failed: $t (${context?.opPackageName})")
+            log("bridge prefs failed: $t (${context?.callerName()})")
             Prefs.empty
         }
     }
@@ -1440,7 +1453,7 @@ class Entry : IXposedHookLoadPackage {
             } catch (t: Throwable) {
                 log("bridge prefs: could not name the caller: $t")
             }
-            log("bridge prefs: calling as ${context.opPackageName}")
+            log("bridge prefs: calling as ${context.callerName()}")
             context
         } catch (t: Throwable) {
             log("bridge prefs: no context: $t")
