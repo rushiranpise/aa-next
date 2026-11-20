@@ -84,6 +84,10 @@ The APK ends up in `app/build/outputs/apk/release/`.
 - Icons are Google's [Material Symbols](https://github.com/google/material-design-icons) (Apache License 2.0).
 - The AA Next app icon was provided by [rushiranpise](https://github.com/rushiranpise).
 
+## Support
+
+If AA Next is useful to you, you can [buy me a coffee](https://buymeacoffee.com/rushiranpise).
+
 ## License
 
 AGPL-3.0, because the car screen on the phone is built on Headunit Revived. See [LICENSE](LICENSE).

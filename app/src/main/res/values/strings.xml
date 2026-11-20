@@ -139,6 +139,8 @@
 
     <string name="credit_aa_mods">Based on AA Mods</string>
     <string name="credit_aa_mods_summary">Original project by ImNoammm · opens on GitHub</string>
+    <string name="buy_me_a_coffee">Buy me a coffee</string>
+    <string name="buy_me_a_coffee_summary">Support AA Next · opens on Buy Me a Coffee</string>
     <string name="version_title">AA Next %1$s</string>
     <string name="update_checking">Checking for updates…</string>
     <string name="update_latest">Up to date</string>

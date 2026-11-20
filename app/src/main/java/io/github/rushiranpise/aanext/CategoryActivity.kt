@@ -143,6 +143,12 @@ class CategoryActivity : SettingsScreen() {
                     open(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ImNoammm/aa-mods")))
                 }
             }
+            row(R.drawable.ic_coffee, R.string.buy_me_a_coffee).apply {
+                findViewById<TextView>(R.id.summary).setText(R.string.buy_me_a_coffee_summary)
+                setOnClickListener {
+                    open(Intent(Intent.ACTION_VIEW, Uri.parse("https://buymeacoffee.com/rushiranpise")))
+                }
+            }
         }
         section(R.string.group_module) {
             row(R.drawable.ic_extension, R.string.hook_status).apply {
