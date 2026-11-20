@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/scroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -12,15 +13,25 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingHorizontal="16dp"
-        android:paddingTop="48dp"
+        android:paddingTop="32dp"
         android:paddingBottom="24dp">
 
-        <ImageView
-            android:layout_width="96dp"
-            android:layout_height="96dp"
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="120dp"
+            android:layout_height="120dp"
             android:layout_gravity="center_horizontal"
-            android:importantForAccessibility="no"
-            android:src="@mipmap/ic_launcher" />
+            app:cardBackgroundColor="?attr/colorPrimaryContainer"
+            app:cardCornerRadius="36dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
+
+            <ImageView
+                android:layout_width="88dp"
+                android:layout_height="88dp"
+                android:layout_gravity="center"
+                android:importantForAccessibility="no"
+                android:src="@mipmap/ic_launcher" />
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
             android:layout_width="match_parent"
@@ -28,7 +39,7 @@
             android:layout_marginTop="24dp"
             android:gravity="center"
             android:text="@string/welcome_title"
-            android:textAppearance="?attr/textAppearanceHeadlineMedium"
+            android:textAppearance="?attr/textAppearanceDisplaySmallEmphasized"
             android:textColor="?attr/colorOnSurface" />
 
         <TextView
@@ -55,8 +66,16 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/done"
+            style="?attr/materialButtonStyle"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/welcome_continue" />
+            android:layout_height="56dp"
+            android:layout_marginTop="24dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="@string/welcome_continue"
+            android:textAppearance="?attr/textAppearanceLabelLargeEmphasized"
+            app:icon="@drawable/ic_arrow_forward"
+            app:iconGravity="end"
+            app:iconTint="?attr/colorOnPrimary" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

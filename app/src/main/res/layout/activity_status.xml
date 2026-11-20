@@ -11,7 +11,8 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         app:navigationIcon="@drawable/ic_arrow_back"
-        app:title="@string/hook_status" />
+        app:title="@string/hook_status"
+        app:titleTextAppearance="?attr/textAppearanceTitleLargeEmphasized" />
 
     <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"

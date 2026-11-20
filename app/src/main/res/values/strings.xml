@@ -121,7 +121,13 @@
     <string name="restart_auto">Restart Auto</string>
     <string name="hook_status">Hook status</string>
     <string name="hook_status_waiting">Waiting for Android Auto to report</string>
-    <string name="hook_status_counts">%1$d ready · %2$d failed</string>
+    <string name="hook_status_all_good">Everything is working</string>
+    <string name="hook_status_no_failures">No failures · %1$d off</string>
+    <plurals name="hook_status_attention">
+        <item quantity="one">%1$d hook needs attention</item>
+        <item quantity="other">%1$d hooks need attention</item>
+    </plurals>
+    <string name="hook_status_hint">Open Auto, then come back for the report</string>
     <string name="hook_status_counts_off">%1$d ready · %2$d off · %3$d failed</string>
     <string name="hook_status_module">AA Mods %1$s · Android Auto %2$s</string>
     <string name="hook_status_reported">Reported %1$s · %2$s</string>

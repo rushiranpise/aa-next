@@ -1,6 +1,7 @@
 package uk.noammm.aamods
 
 import android.os.Bundle
+import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
@@ -8,6 +9,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
@@ -63,27 +65,51 @@ class StatusActivity : AppCompatActivity() {
     }
 
     private fun summary(report: JSONObject, ready: Int, off: Int, failed: Int) {
-        val card = card()
-        val box = box()
+        val failedState = failed > 0
+        val accent = if (failedState) com.google.android.material.R.attr.colorErrorContainer
+                     else com.google.android.material.R.attr.colorPrimaryContainer
+        val onAccent = if (failedState) com.google.android.material.R.attr.colorOnErrorContainer
+                       else com.google.android.material.R.attr.colorOnPrimaryContainer
+        val card = card().apply { setCardBackgroundColor(MaterialColors.getColor(this, accent)) }
+        val box = box().apply { setPadding(24.dp, 24.dp, 24.dp, 24.dp) }
         box.addView(TextView(this).apply {
-            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_TitleLarge)
-            text = if (off > 0) {
-                getString(R.string.hook_status_counts_off, ready, off, failed)
-            } else {
-                getString(R.string.hook_status_counts, ready, failed)
-            }
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelLarge_Emphasized)
+            setTextColor(MaterialColors.getColor(this, onAccent))
+            alpha = 0.8f
+            letterSpacing = 0.08f
+            text = getString(R.string.hook_status).uppercase()
+        })
+        val headline = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, 4.dp, 0, 0)
+        }
+        headline.addView(TextView(this).apply {
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_DisplayMedium_Emphasized)
             setTextColor(
-                when {
-                    failed > 0 -> MaterialColors.getColor(this, androidx.appcompat.R.attr.colorError)
-                    ready > 0 -> getColor(R.color.status_ok)
-                    else -> MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant)
-                }
+                if (failedState) MaterialColors.getColor(this, androidx.appcompat.R.attr.colorError)
+                else MaterialColors.getColor(this, onAccent)
             )
+            text = (if (failedState) failed else ready).toString()
+        })
+        headline.addView(TextView(this).apply {
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_TitleLarge_Emphasized)
+            setTextColor(MaterialColors.getColor(this, onAccent))
+            setPadding(12.dp, 0, 0, 0)
+            text = getString(if (failedState) R.string.hook_status_failed else R.string.hook_status_ready)
+        })
+        box.addView(headline)
+        box.addView(TextView(this).apply {
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
+            setTextColor(MaterialColors.getColor(this, onAccent))
+            setPadding(0, 8.dp, 0, 0)
+            text = getString(R.string.hook_status_counts_off, ready, off, failed)
         })
         box.addView(TextView(this).apply {
             setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium)
-            setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant))
-            setPadding(0, 8.dp, 0, 0)
+            setTextColor(MaterialColors.getColor(this, onAccent))
+            alpha = 0.8f
+            setPadding(0, 16.dp, 0, 0)
             text = getString(
                 R.string.hook_status_module,
                 report.optString("module"),
@@ -93,7 +119,8 @@ class StatusActivity : AppCompatActivity() {
         val at = report.optLong("at")
         if (at > 0) box.addView(TextView(this).apply {
             setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium)
-            setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant))
+            setTextColor(MaterialColors.getColor(this, onAccent))
+            alpha = 0.8f
             val process = report.optString("process")
             val name = if (process == Entry.GEARHEAD) getString(R.string.hook_status_main) else process.substringAfterLast(':')
             text = getString(
@@ -104,7 +131,8 @@ class StatusActivity : AppCompatActivity() {
         })
         box.addView(TextView(this).apply {
             setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodySmall)
-            setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant))
+            setTextColor(MaterialColors.getColor(this, onAccent))
+            alpha = 0.75f
             setPadding(0, 12.dp, 0, 0)
             setText(R.string.hook_status_explanation)
         })
@@ -159,24 +187,38 @@ class StatusActivity : AppCompatActivity() {
         )
         status.setTextColor(
             when {
-                failed -> MaterialColors.getColor(status, androidx.appcompat.R.attr.colorError)
+                failed -> MaterialColors.getColor(status, com.google.android.material.R.attr.colorOnErrorContainer)
                 off -> MaterialColors.getColor(status, com.google.android.material.R.attr.colorOnSurfaceVariant)
                 else -> getColor(R.color.status_ok)
             }
         )
+        status.background = GradientDrawable().apply {
+            cornerRadius = 100f
+            setColor(
+                when {
+                    failed -> MaterialColors.getColor(status, com.google.android.material.R.attr.colorErrorContainer)
+                    off -> MaterialColors.getColor(status, com.google.android.material.R.attr.colorSurfaceContainerHighest)
+                    else -> ColorUtils.setAlphaComponent(getColor(R.color.status_ok), 48)
+                }
+            )
+        }
+        status.setPadding(12.dp, 5.dp, 12.dp, 5.dp)
         return row
     }
 
     private fun textCard(title: String, body: String) {
-        val card = card()
-        val box = box()
+        val card = card().apply {
+            setCardBackgroundColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimaryContainer))
+        }
+        val box = box().apply { setPadding(24.dp, 24.dp, 24.dp, 24.dp) }
         box.addView(TextView(this).apply {
-            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_TitleMedium)
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_HeadlineSmall_Emphasized)
+            setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnPrimaryContainer))
             text = title
         })
         box.addView(TextView(this).apply {
             setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium)
-            setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant))
+            setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnPrimaryContainer))
             setPadding(0, 8.dp, 0, 0)
             text = body
         })
@@ -187,7 +229,7 @@ class StatusActivity : AppCompatActivity() {
     private fun card() = MaterialCardView(this).apply {
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             .apply { topMargin = 8.dp }
-        radius = 24.dp.toFloat()
+        radius = 32.dp.toFloat()
         setCardBackgroundColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurfaceContainerHigh))
     }
 

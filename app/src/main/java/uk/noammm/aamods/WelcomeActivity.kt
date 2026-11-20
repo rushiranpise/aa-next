@@ -38,7 +38,7 @@ class WelcomeActivity : AppCompatActivity() {
         state = getSharedPreferences(AppState.FILE, MODE_PRIVATE)
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.content)) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.updatePadding(top = bars.top + 48.dp, bottom = bars.bottom + 24.dp)
+            view.updatePadding(top = bars.top + 24.dp, bottom = bars.bottom + 24.dp)
             insets
         }
 

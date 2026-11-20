@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.AAMods" parent="Theme.Material3.DynamicColors.DayNight.NoActionBar" />
+    <!-- Material 3 Expressive: bolder type, pill buttons, larger shapes, springy components and
+         wallpaper-derived colour on Android 12 and newer -->
+    <style name="Theme.AAMods" parent="Theme.Material3Expressive.DynamicColors.DayNight.NoActionBar" />
 </resources>

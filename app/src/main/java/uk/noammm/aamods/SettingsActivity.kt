@@ -50,6 +50,11 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var content: LinearLayout
     private lateinit var restartAction: MaterialButton
     private lateinit var statusRow: View
+    private lateinit var statusSummary: TextView
+    private lateinit var statusReady: TextView
+    private lateinit var statusOff: TextView
+    private lateinit var statusFailed: TextView
+    private lateinit var statusMeta: TextView
     private lateinit var microgStatus: TextView
     private lateinit var version: View
     private var update: Updates.Release? = null
@@ -97,10 +102,15 @@ class SettingsActivity : AppCompatActivity() {
         restartAction = findViewById(R.id.restart_action)
         restartAction.setOnClickListener { restartAndroidAuto() }
 
-        section(R.string.section_status) {
-            statusRow = row(R.drawable.ic_extension, R.string.hook_status)
-            statusRow.setOnClickListener { startActivity(Intent(this@SettingsActivity, StatusActivity::class.java)) }
+        statusRow = layoutInflater.inflate(R.layout.item_status_hero, content, false).also {
+            it.setOnClickListener { startActivity(Intent(this@SettingsActivity, StatusActivity::class.java)) }
+            content.addView(it)
         }
+        statusSummary = statusRow.findViewById(R.id.status_summary)
+        statusReady = statusRow.findViewById(R.id.status_ready)
+        statusOff = statusRow.findViewById(R.id.status_off)
+        statusFailed = statusRow.findViewById(R.id.status_failed)
+        statusMeta = statusRow.findViewById(R.id.status_meta)
         refreshStatus()
 
         section(R.string.section_driving) {
@@ -157,11 +167,17 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun refreshStatus() {
-        val summary = statusRow.findViewById<TextView>(R.id.summary)
         val report = AppState.status(this)
+        val onContainer = MaterialColors.getColor(statusSummary, com.google.android.material.R.attr.colorOnPrimaryContainer)
         if (report == null) {
-            summary.setText(R.string.hook_status_waiting)
-            summary.setTextColor(MaterialColors.getColor(summary, com.google.android.material.R.attr.colorOnSurfaceVariant))
+            for (number in listOf(statusReady, statusOff, statusFailed)) {
+                number.text = "—"
+                number.alpha = 0.55f
+            }
+            statusFailed.setTextColor(onContainer)
+            statusSummary.setTextColor(onContainer)
+            statusSummary.setText(R.string.hook_status_waiting)
+            statusMeta.setText(R.string.hook_status_hint)
             return
         }
         val hooks = report.optJSONArray("hooks")
@@ -175,17 +191,28 @@ class SettingsActivity : AppCompatActivity() {
                 Status.FAILED -> failed++
             }
         }
-        summary.text = if (off > 0) {
-            getString(R.string.hook_status_counts_off, ready, off, failed)
-        } else {
-            getString(R.string.hook_status_counts, ready, failed)
+        statusReady.text = ready.toString()
+        statusOff.text = off.toString()
+        statusFailed.text = failed.toString()
+        statusReady.alpha = 1f
+        statusOff.alpha = if (off > 0) 1f else 0.55f
+        statusFailed.alpha = if (failed > 0) 1f else 0.55f
+        statusFailed.setTextColor(
+            if (failed > 0) MaterialColors.getColor(statusFailed, androidx.appcompat.R.attr.colorError) else onContainer
+        )
+        statusSummary.setTextColor(
+            if (failed > 0) MaterialColors.getColor(statusSummary, androidx.appcompat.R.attr.colorError) else onContainer
+        )
+        statusSummary.text = when {
+            failed > 0 -> resources.getQuantityString(R.plurals.hook_status_attention, failed, failed)
+            off > 0 -> getString(R.string.hook_status_no_failures, off)
+            ready > 0 -> getString(R.string.hook_status_all_good)
+            else -> getString(R.string.hook_status_waiting)
         }
-        summary.setTextColor(
-            when {
-                failed > 0 -> MaterialColors.getColor(summary, androidx.appcompat.R.attr.colorError)
-                ready > 0 -> getColor(R.color.status_ok)
-                else -> MaterialColors.getColor(summary, com.google.android.material.R.attr.colorOnSurfaceVariant)
-            }
+        statusMeta.text = getString(
+            R.string.hook_status_module,
+            report.optString("module"),
+            report.optString("androidAuto").ifEmpty { "Android Auto" },
         )
     }
 
@@ -301,6 +328,7 @@ class SettingsActivity : AppCompatActivity() {
         row.findViewById<TextView>(R.id.summary).setText(summary)
         val switch = row.findViewById<MaterialSwitch>(R.id.toggle).apply {
             isVisible = true
+            contentDescription = getString(title)
             isChecked = Prefs.on(prefs, key)
             setOnCheckedChangeListener { _, on ->
                 prefs.edit().putBoolean(key, on).apply()
