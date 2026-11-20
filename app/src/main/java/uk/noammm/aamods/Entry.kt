@@ -943,19 +943,17 @@ class Entry : IXposedHookLoadPackage {
     private val openApps = java.util.Collections.synchronizedMap(LinkedHashMap<ComponentName, String>())
 
     // nsj.k(region, app, time) records the app now showing in a region, or null when it went away; nti.a() is the app's
-    // component and nti.b its category (ntf: NAVIGATION, MEDIA, ...). (17.6: mpj.k with mqj.)
+    // component and nti.b its category (ntf: NAVIGATION, MEDIA, ...). ntv.c is what a native app's launcher item runs,
+    // and Android Auto doesn't put those through nsj.k, so record the tap as well. (17.6: mpj.k with mqj.)
     private fun trackOpenApps() {
         XposedHelpers.findAndHookMethod("nsj", cl, "k", CAR_REGION_ID, "nti", Long::class.javaPrimitiveType, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val region = param.args[0]
                 val app = param.args[1]
                 val component = app?.let { XposedHelpers.callMethod(it, "a") as ComponentName }
-                val category = app?.let { appCategory(it) }
+                val category = app?.let { appCategory(it) ?: "APP" }
                 if (component != null && category != null && component.className !in NOT_APPS) {
-                    openApps.remove(component)
-                    openApps[component] = category
-                    reconnectMusicApp(component.packageName)
-                    refreshRail()
+                    recordOpenApp(component, category)
                 }
                 when (category) {
                     "NAVIGATION" -> {
@@ -970,17 +968,33 @@ class Entry : IXposedHookLoadPackage {
                 }
             }
         })
-        log("open apps: nsj.k records each region's app")
+        XposedHelpers.findAndHookMethod("ntv", cl, "c", object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val app = XposedHelpers.getObjectField(param.thisObject, "c")
+                val component = XposedHelpers.callMethod(app, "a") as? ComponentName ?: return
+                recordOpenApp(component, appCategory(app) ?: "APP")
+            }
+        })
+        log("open apps: nsj.k and native app launches record each app")
+    }
+
+    private fun recordOpenApp(component: ComponentName, category: String) {
+        if (component.className in NOT_APPS) return
+        openApps.remove(component)
+        openApps[component] = category
+        reconnectMusicApp(component.packageName)
+        refreshRail()
     }
 
     // The category is an enum whose constants are renamed with the build, but its public int field h is the id that
-    // Android Auto compares against: 1 navigation, 3 media (ntf.h in 664604, nsf.h in 18.2)
+    // Android Auto compares against: 1 navigation, 3 media (ntf.h in 664604, nsf.h in 18.2). Every other app is a
+    // plain app, which recents shows the same way; it is not a category Android Auto treats specially.
     private fun appCategory(app: Any): String? = try {
         val category = XposedHelpers.getObjectField(app, "b") ?: return null
         when (XposedHelpers.getIntField(category, "h")) {
             1 -> "NAVIGATION"
             3 -> "MEDIA"
-            else -> null
+            else -> "APP"
         }
     } catch (_: Throwable) {
         null
@@ -1520,20 +1534,50 @@ class Entry : IXposedHookLoadPackage {
         log("phone apps: ${constructors.size} entry constructors on ${appInfo.name}")
     }
 
-    // The Cradle launcher splits apps between an Entertainment tab (Google's games, parked-only) and Car Optimized
-    // Apps. The 17.6 splitter (mcz) is a different class in 18.2 and unmapped, so parked-only apps are left where
-    // Android Auto puts them; the Entertainment tab still drops from the template when empty
-    // (TabTemplateInternal copies gwf.d, the tab list). The Phone Apps tab is dropped too: in a projected session
-    // opening it ends projection, so hookPhoneAppsInCarGrid puts every launcher app in the car grid instead.
+    // The Cradle launcher has three tabs: Car Optimized Apps (nts.f, Android Auto's own car-app list),
+    // Entertainment Apps (nts.h, Google's Play Games tab, empty without a Play Games library) and Phone Apps
+    // (nts.g, every launcher app). The last one asks the phone screen for native focus when opened, which ends
+    // projection, so it is given the Entertainment content id in the tab list instead. nts then builds that tab
+    // from the grid hookPhoneAppsTab fills, and the car tab keeps only Android Auto's own apps.
     private fun hookLauncherTabs() {
         XposedHelpers.findAndHookConstructor(
             "com.android.car.libraries.apphost.internal.model.TabTemplateInternal", cl, XposedHelpers.findClass("gwf", cl),
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val tabs = XposedHelpers.getObjectField(param.args[0], "d") as List<*>
-                    XposedHelpers.setObjectField(param.args[0], "d", ArrayList(tabs.filter {
+                    val kept: List<Any?> = runCatching {
+                        val tabInternal = XposedHelpers.findClass(
+                            "com.android.car.libraries.apphost.internal.model.TabInternal", cl,
+                        )
+                        val constructor = XposedHelpers.findConstructorExact(
+                            tabInternal,
+                            XposedHelpers.findClass("androidx.car.app.model.CarText", cl),
+                            XposedHelpers.findClass("androidx.car.app.model.CarIcon", cl),
+                            String::class.java,
+                        )
+                        val list = ArrayList<Any?>(tabs.size)
+                        for (tab in tabs) {
+                            when (XposedHelpers.callMethod(tab, "getContentId")) {
+                                // Google's games tab, empty without a Play Games library
+                                "ENTERTAINMENT_APPS_ID" -> {}
+                                // Keep the Phone Apps tab on the content path nts builds from h, not g
+                                "ALL_PHONE_APPS_ID" -> list.add(constructor.newInstance(
+                                    XposedHelpers.callMethod(tab, "getTitle"),
+                                    XposedHelpers.callMethod(tab, "getIcon"),
+                                    "ENTERTAINMENT_APPS_ID",
+                                ))
+                                else -> list.add(tab)
+                            }
+                        }
+                        list
+                    }.onFailure {
+                        log("launcher tabs: could not keep the Phone Apps tab, dropping it: $it")
+                    }.getOrNull() ?: tabs.filter {
                         XposedHelpers.callMethod(it, "getContentId") !in setOf("ENTERTAINMENT_APPS_ID", "ALL_PHONE_APPS_ID")
-                    }))
+                    }
+                    XposedHelpers.setObjectField(param.args[0], "d", kept)
+                    logOnce("launcher tabs: " + tabs.joinToString { XposedHelpers.callMethod(it, "getContentId").toString() } +
+                        " -> " + kept.joinToString { XposedHelpers.callMethod(it, "getContentId").toString() })
                 }
             })
         // ntq.b picks the tabbed launcher (nts) only when a car reports a touchscreen. The phone's own head unit
@@ -1553,41 +1597,49 @@ class Entry : IXposedHookLoadPackage {
                 }.onFailure { log("launcher tabs: could not switch to the tabbed launcher: $it") }
             }
         })
-        hookPhoneAppsInCarGrid()
-        log("launcher tabs: Entertainment and Phone Apps tabs dropped from the template")
+        hookPhoneAppsTab()
+        hookTabSelection()
+        log("launcher tabs: Entertainment dropped, Phone Apps kept, car tab left alone")
     }
 
-    // Every launcher app joins the car grid as an Android Auto "native app", the same item type its own Phone Apps tab
-    // uses: nfl.d lists the launcher activities, ntv.b turns one into an icon and label, and nuf adds the notification
-    // badge. The Phone Apps tab itself asks the phone screen for native focus when opened, which ends projection, so
-    // the apps join the car tab instead and stay reachable from the car screen.
-    private fun hookPhoneAppsInCarGrid() {
+    // umz.a is the tab-selected callback. The Phone Apps tab is given the Entertainment content id in the template,
+    // but the host can still report the id it cached for that tab; translate it back so nts builds the injected h
+    // list instead of the native phone-apps request, which ends projection. (17.6: different lambda class.)
+    private fun hookTabSelection() {
+        runCatching {
+            XposedHelpers.findAndHookMethod("umz", cl, "a", String::class.java, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (XposedHelpers.getIntField(param.thisObject, "\$cid") != 1) return
+                    if (param.args[0] == "ALL_PHONE_APPS_ID") param.args[0] = "ENTERTAINMENT_APPS_ID"
+                }
+            })
+            log("launcher tabs: Phone Apps selections build the launcher grid")
+        }.onFailure { log("launcher tabs: could not hook tab selection: $it") }
+    }
+
+    // Every launcher app fills the Phone Apps tab. nfl.d lists the launcher activities, ntv.b turns one into an icon
+    // and label, and nuf adds the notification badge, the same item type Android Auto's own launcher uses. The tab
+    // carries the Entertainment content id, so nts.h reads the h list after subscribing to the entertainment source;
+    // that can clear it, so the launcher grid is replaced at nts.a(List), the one place it is built. Only the Phone
+    // Apps tab is touched: the Car Optimized Apps tab keeps Android Auto's own car-optimized list.
+    private fun hookPhoneAppsTab() {
         XposedHelpers.findAndHookMethod("nts", cl, "a", List::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val car = XposedHelpers.getObjectField(param.thisObject, "f")
-                if (param.args[0] !== car) return
-                val apps = param.args[0] as? List<*> ?: return
-                val extra = phoneGridItems() ?: return
-                val seen = apps.mapNotNullTo(HashSet()) { componentPackage(it) }
-                val added = extra.filter { componentPackage(it) !in seen }
-                if (added.isEmpty()) return
-                param.args[0] = ArrayList(apps + added)
+                if (param.args[0] === car) return
+                if (XposedHelpers.getObjectField(param.thisObject, "j") != "ENTERTAINMENT_APPS_ID") return
+                val items = phoneGridItems() ?: return
+                param.args[0] = items
                 Status.used("all phone apps")
-                logOnce("phone apps: ${added.size} added to the car grid")
+                logOnce("phone apps: ${items.size} apps on the Phone Apps tab")
             }
         })
-        Status.installed("all phone apps", "car grid")
+        Status.installed("all phone apps", "phone apps tab")
+        log("launcher tabs: Phone Apps tab shows every launcher app")
     }
 
-    // nts.a builds one entry per app; nuf.a is the app entry (nue), whose c is the app (nti), whose a() is the
-    // component. Packages already in the car list win, so a car app never shows twice.
-    private fun componentPackage(item: Any?): String? = runCatching {
-        val app = XposedHelpers.getObjectField(XposedHelpers.getObjectField(item, "a"), "c")
-        (XposedHelpers.callMethod(app, "a") as ComponentName).packageName
-    }.getOrNull()
-
-    // nfl.d(rvh) returns Android Auto's own launcher-app list. ljo.b().e() is the connected car token it wants, the
-    // same one it reads in its Phone Apps tab. That query runs a Cradle allowlist over the launcher apps, so any
+    // nfl.d(rvh) returns Android Auto's own "all phone apps" list. ljo.b().e() is the connected car token it wants,
+    // the same one the native Phone Apps tab reads. That query runs a Cradle allowlist over the launcher apps, so any
     // package it skips is added from PackageManager: "all apps" means all of them. Item construction is cached per
     // process; it costs one PackageManager lookup per app, so it must not run on every template build.
     @Volatile private var phoneGridItems: List<Any>? = null
@@ -1638,7 +1690,7 @@ class Entry : IXposedHookLoadPackage {
             built
         }.onFailure {
             Status.failed("all phone apps", it)
-            log("phone apps: could not build the car grid: $it")
+            log("phone apps: could not build the phone apps grid: $it")
         }.getOrNull()
         if (items != null) {
             phoneGridItems = items
