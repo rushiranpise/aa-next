@@ -852,12 +852,17 @@ class Entry : IXposedHookLoadPackage {
             declaredClass { usingEqStrings(FRAME_RATE_LOG) }
             paramTypes("int")
             returnType("void")
-        } ?: return
+        }
+        if (apply == null) {
+            log("frame rate: MediaFormat capped at $FRAME_RATE_CAP, no setFrameRateRestriction hook")
+            return
+        }
         XposedBridge.hookMethod(apply, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 if (param.args[0] as Int > FRAME_RATE_CAP) param.args[0] = FRAME_RATE_CAP
             }
         })
+        log("frame rate: MediaFormat and setFrameRateRestriction capped at $FRAME_RATE_CAP")
     }
 
     // Android Auto's own developer setting "Video resolution" (car_video_resolution in its carservice prefs) limits
@@ -867,12 +872,16 @@ class Entry : IXposedHookLoadPackage {
     // (jto.D, whose i holds the car's yqf configs with the size code in c). RESOLUTION_SIZES holds the car's
     // protocol codes, which yqe.b maps to sizes (1 = 480p, 2 = 720p landscape, 6 = portrait). (17.6: ivn.B with xqd.)
     private fun hookResolution(resolution: String) {
-        if (resolution !in RESOLUTION_SIZES) return
+        if (resolution !in RESOLUTION_SIZES) {
+            log("resolution: $resolution is not a size Android Auto knows")
+            return
+        }
         XposedHelpers.findAndHookMethod("android.app.SharedPreferencesImpl", cl, "getString", String::class.java, String::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 if (param.args[0] == "car_video_resolution") param.result = resolution
             }
         })
+        log("resolution: answering $resolution")
     }
 
     // Start on launcher and recents both show only the apps the user opened
