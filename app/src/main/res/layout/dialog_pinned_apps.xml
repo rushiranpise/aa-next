@@ -39,7 +39,6 @@
             android:id="@+id/apps"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:choiceMode="multipleChoice"
             android:divider="@null"
             android:scrollbars="vertical" />
 

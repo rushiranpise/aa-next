@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -14,7 +15,9 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.View
-import android.widget.ArrayAdapter
+import android.view.ViewGroup
+import android.widget.BaseAdapter
+import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -509,7 +512,24 @@ class SettingsActivity : AppCompatActivity() {
             val view = layoutInflater.inflate(R.layout.dialog_pinned_apps, null) as LinearLayout
             val query = view.findViewById<TextInputEditText>(R.id.query)
             val list = view.findViewById<ListView>(R.id.apps)
-            val adapter = ArrayAdapter<String>(this@SettingsActivity, android.R.layout.simple_list_item_multiple_choice)
+            val adapter = object : BaseAdapter() {
+                // Icons are looked up once per package; the list rebinds the same rows while scrolling
+                private val icons = mutableMapOf<String, Drawable>()
+
+                override fun getCount() = shown.size
+                override fun getItem(position: Int) = shown[position]
+                override fun getItemId(position: Int) = position.toLong()
+                override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                    val row = convertView ?: layoutInflater.inflate(R.layout.item_app_choice, parent, false)
+                    val pkg = shown[position]
+                    row.findViewById<TextView>(R.id.app_name).text = labels.getValue(pkg)
+                    row.findViewById<ImageView>(R.id.app_icon).setImageDrawable(
+                        icons.getOrPut(pkg) { appIcon(pkg) }
+                    )
+                    row.findViewById<CheckBox>(R.id.app_check).isChecked = pkg in order
+                    return row
+                }
+            }
             list.adapter = adapter
             list.emptyView = view.findViewById(R.id.empty)
             // Tall enough to browse, capped so the dialog still fits on small screens
@@ -522,10 +542,7 @@ class SettingsActivity : AppCompatActivity() {
                 val needle = text.trim()
                 shown.clear()
                 shown += if (needle.isEmpty()) apps else apps.filter { labels.getValue(it).contains(needle, ignoreCase = true) }
-                adapter.clear()
-                adapter.addAll(shown.map { labels.getValue(it) })
-                // Positions changed, so reapply the ticks from the packages rather than the old rows
-                shown.forEachIndexed { i, pkg -> list.setItemChecked(i, pkg in order) }
+                adapter.notifyDataSetChanged()
             }
             filter("")
             query.addTextChangedListener(object : TextWatcher {
@@ -533,14 +550,10 @@ class SettingsActivity : AppCompatActivity() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
                 override fun afterTextChanged(s: Editable?) = filter(s?.toString().orEmpty())
             })
-            // The list flips the row before the click reaches us, so the new state is the one to keep
             list.setOnItemClickListener { _, _, position, _ ->
                 val pkg = shown[position]
-                if (list.isItemChecked(position)) {
-                    if (pkg !in order) order += pkg
-                } else {
-                    order -= pkg
-                }
+                if (pkg in order) order -= pkg else order += pkg
+                adapter.notifyDataSetChanged()
             }
 
             MaterialAlertDialogBuilder(this@SettingsActivity)
@@ -600,6 +613,13 @@ class SettingsActivity : AppCompatActivity() {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
     } catch (_: PackageManager.NameNotFoundException) {
         pkg
+    }
+
+    // Adaptive icons come back as drawables too, so the list can show them as they are on the phone
+    private fun appIcon(pkg: String): Drawable = try {
+        packageManager.getApplicationIcon(pkg)
+    } catch (_: PackageManager.NameNotFoundException) {
+        packageManager.defaultActivityIcon
     }
 
     override fun onResume() {
