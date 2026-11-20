@@ -29,6 +29,8 @@ object Updates {
             setRequestProperty("Accept", "application/vnd.github+json")
             setRequestProperty("User-Agent", USER_AGENT)
         }
+        // A repository with no releases yet answers 404; that is simply nothing newer to offer
+        if (connection.responseCode == 404) return Release("0.0", "", null, -1L)
         if (connection.responseCode != 200) throw IOException("GitHub answered ${connection.responseCode}")
         val release = JSONObject(connection.inputStream.use { String(it.readBytes(), Charsets.UTF_8) })
         val assets = release.optJSONArray("assets")
