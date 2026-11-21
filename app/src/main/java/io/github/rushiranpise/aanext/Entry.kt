@@ -1706,27 +1706,100 @@ class Entry : IXposedHookLoadPackage {
         log("launcher tabs: Entertainment dropped, Phone Apps kept, car tab left alone")
     }
 
-    // A taskbar shortcut for a Car App Library media app launches the app's CarAppService component, but Android Auto's
-    // media interceptor (mpg) only rewrites that launch to its media host when its app registry calls the target a
-    // media app. For Spotify the registry does not, so the service component falls through to a plain start. Let the
-    // media processor take exactly those launches: mpg.d then points the intent at its media host and carries the
-    // CarAppService in GH.ComponentExtra, which is what the car UI binds. YouTube has no CarAppService and keeps its
-    // normal launch, and phone activities (the Phone Apps tab) are not CarAppServices and stay as they are.
+    // A taskbar shortcut for a Car App Library media app sends one of the playback-view actions with the app's media
+    // component. Android Auto's media interceptor (mpf) answers that by launching the app's phone launcher intent,
+    // which is why Spotify opens its phone UI instead of its Car App Library UI. For a package that ships a MEDIA
+    // CarAppService the launch is pointed at that service and the interceptors are bypassed; mpg then rewrites it to
+    // Android Auto's media host and carries the service in GH.ComponentExtra, which is what the car UI binds.
+    // YouTube has no MEDIA CarAppService and keeps its normal launch.
     private fun hookMediaAppLaunches() {
         val rue = XposedHelpers.findClass("rue", cl)
+        // Point the central launch entry at the package's MEDIA CarAppService before the interceptors see it. Only the
+        // playback-view actions are remapped; a phone activity launch (the Phone Apps tab) stays as it is.
+        XposedHelpers.findAndHookMethod("nsk", cl, "k", Intent::class.java, rue, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val intent = param.args[0] as? Intent ?: return
+                val action = intent.action ?: return
+                if (action !in MEDIA_ACTIONS) return
+                val target = intent.component ?: return
+                if (target.packageName == GEARHEAD || target.className in NOT_APPS) return
+                val service = mediaCarAppForPackage(target.packageName)
+                if (service == null) {
+                    logOnce("media app launches: no MEDIA car app for ${target.packageName}")
+                    return
+                }
+                if (service == target) return
+                intent.component = service
+                logOnce("media app launches: $action ${target.flattenToShortString()} -> ${service.flattenToShortString()}")
+            }
+        })
+        // mpf answers a playback-view action for a registered media component by opening the phone app, so decline
+        // that interception when the package also has a MEDIA CarAppService and keep the service as the target.
+        XposedHelpers.findAndHookMethod("mpf", cl, "b", Intent::class.java, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.result != true) return
+                val intent = param.args[0] as? Intent ?: return
+                val target = intent.component ?: return
+                val service = mediaCarAppForPackage(target.packageName) ?: return
+                intent.component = service
+                param.result = false
+                logOnce("media app launches: media view ${target.flattenToShortString()} -> ${service.flattenToShortString()}")
+            }
+        })
+        // nfd ("ParkedApp") reports a registered app launch and returns without starting anything. A playback-view
+        // launch for a package with a MEDIA CarAppService must reach mpg instead, so decline that interception too.
+        XposedHelpers.findAndHookMethod("nfd", cl, "b", Intent::class.java, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.result != true) return
+                val intent = param.args[0] as? Intent ?: return
+                val action = intent.action ?: return
+                if (action !in MEDIA_ACTIONS) return
+                val target = intent.component ?: return
+                if (mediaCarAppForPackage(target.packageName) == null) return
+                param.result = false
+                logOnce("media app launches: parked app ${target.flattenToShortString()} left to the media host")
+            }
+        })
+        // mpg takes the launch over when its target is the package's MEDIA CarAppService. mpg.d then points the intent
+        // at the media host (noe.f) and carries the service in GH.ComponentExtra for the media session to bind.
         XposedHelpers.findAndHookMethod("mpg", cl, "k", Intent::class.java, rue, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val intent = param.args[0] as? Intent ?: return
                 if (mediaLaunch(intent) != null) param.result = true
             }
         })
+        // The rail's recent items are built by ona.l, which hands non-active apps to ona.m. Its click (omu) builds a
+        // bare Intent for whatever component the recent entry holds. For Spotify that is the phone activity, not the
+        // CarAppService, so mpg never recognizes the launch and the phone app opens. Swap only that click target: the
+        // item keeps its phone icon and identity, and YouTube (no MEDIA CarAppService) is untouched.
+        runCatching {
+            XposedHelpers.findAndHookMethod("omu", cl, "invoke", object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    // The fields are final; a failed write must leave the click untouched rather than break the rail
+                    runCatching {
+                        val self = param.thisObject ?: return@runCatching
+                        val category = XposedHelpers.getObjectField(self, "d") as? Enum<*> ?: return@runCatching
+                        if (category.name != "RECENT" && category.name != "MEDIA") return@runCatching
+                        val target = XposedHelpers.getObjectField(self, "c") as? ComponentName ?: return@runCatching
+                        if (target.packageName == GEARHEAD || target.className in NOT_APPS) return@runCatching
+                        val service = mediaCarAppForPackage(target.packageName) ?: return@runCatching
+                        if (service == target) return@runCatching
+                        XposedHelpers.setObjectField(self, "c", service)
+                        logOnce("media app launches: rail ${target.flattenToShortString()} -> ${service.flattenToShortString()}")
+                    }.onFailure { logOnce("media app launches: rail click not remapped: $it") }
+                }
+            })
+        }.onFailure { log("media app launches: rail click hook unavailable: $it") }
         log("media app launches: taskbar shortcuts open the package's car media service")
     }
 
-    // Only a bare launch that already targets the package's Car App Library MEDIA service is a taskbar shortcut for
-    // that app; playback actions, deep links, and phone activities stay as they are.
+    // Only a launch that already targets the package's Car App Library MEDIA service is a taskbar shortcut for that
+    // app: a bare component launch or one of the media playback-view actions. Deep links and phone activities stay
+    // as they are.
     private fun mediaLaunch(intent: Intent): ComponentName? {
-        if (intent.action != null || intent.data != null) return null
+        val action = intent.action
+        if (action != null && action !in MEDIA_ACTIONS) return null
+        if (action == null && intent.data != null) return null
         val target = intent.component ?: return null
         if (target.packageName == GEARHEAD || target.className in NOT_APPS) return null
         return mediaCarApp(target)
@@ -1735,18 +1808,25 @@ class Entry : IXposedHookLoadPackage {
     // The service Android Auto itself launches for a Car App Library media app, found from the app's manifest rather
     // than from Android Auto's registry, which also lists legacy MediaBrowserServices for the same package. The target
     // must be that service: a package's phone activity is never treated as its car media entry point.
-    private fun mediaCarApp(target: ComponentName): ComponentName? = runCatching {
-        val context = AndroidAppHelper.currentApplication() ?: return@runCatching null
+    private fun mediaCarApp(target: ComponentName): ComponentName? =
+        mediaCarApps(target.packageName).firstOrNull { it == target }
+
+    private fun mediaCarAppForPackage(packageName: String): ComponentName? =
+        mediaCarApps(packageName).firstOrNull()
+
+    private fun mediaCarApps(packageName: String): List<ComponentName> = runCatching {
+        if (packageName == GEARHEAD) return@runCatching emptyList()
+        val context = AndroidAppHelper.currentApplication() ?: return@runCatching emptyList()
         val query = Intent("androidx.car.app.CarAppService")
-            .setPackage(target.packageName)
+            .setPackage(packageName)
             .addCategory("androidx.car.app.category.MEDIA")
         context.packageManager.queryIntentServices(query, 0).mapNotNull { info ->
             val service = info.serviceInfo ?: return@mapNotNull null
             ComponentName(service.packageName, service.name)
-        }.firstOrNull { it == target }
+        }
     }.getOrElse {
-        log("media app lookup failed: ${target.flattenToString()}: $it")
-        null
+        log("media app lookup failed: $packageName: $it")
+        emptyList()
     }
 
     // umz.a is the tab-selected callback. The Phone Apps tab is given the Entertainment content id in the template,
@@ -2069,6 +2149,12 @@ class Entry : IXposedHookLoadPackage {
             APP_LAUNCHER, RECENTS_HOST,
             "com.google.android.apps.auto.components.system.navigation.fallback.NavigationFallbackCarActivityService",
             "com.google.android.projection.gearhead.system.ProjectionTrampolineFallbackService",
+        )
+        // The playback-view actions mpf answers by opening an app's phone UI; mpm.e matches the unprefixed one too
+        val MEDIA_ACTIONS = setOf(
+            "androidx.car.app.media.action.SHOW_MEDIA_PLAYBACK",
+            "androidx.car.app.media.MEDIA_SHOW_PLAYBACK_VIEW",
+            "MEDIA_SHOW_PLAYBACK_VIEW",
         )
         const val EXTRA_RECENTS = "io.github.rushiranpise.aanext.RECENTS"
         const val ACTION_CLOSE = "io.github.rushiranpise.aanext.CLOSE_CAR_APP"
