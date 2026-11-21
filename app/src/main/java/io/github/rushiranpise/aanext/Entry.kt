@@ -1039,8 +1039,7 @@ class Entry : IXposedHookLoadPackage {
                 if (nav != null && media != null) return
                 param.result = null
                 val launcher = ComponentName(GEARHEAD, APP_LAUNCHER)
-                val showing = XposedHelpers.callMethod(XposedHelpers.callStaticMethod(XposedHelpers.findClass("nsj", cl), "b"), "f")
-                    ?.let { XposedHelpers.callMethod(it, "a") }
+                val showing = showingApp()
                 // Starting the open app again is what its launcher icon does: it comes to the front on its own
                 startCarApp(if (showing == launcher) nav ?: media ?: launcher else launcher)
             }
@@ -1057,12 +1056,39 @@ class Entry : IXposedHookLoadPackage {
         XposedHelpers.callMethod(starter, "i", intent.setComponent(component))
     }
 
+    // The app now showing on the car display (nsj.f holds the main region's app, whose nti.a is its component), read
+    // before the recents screen opens so a second tap on the recents button can put that screen back
+    private fun showingApp(): ComponentName? = runCatching {
+        val shown = XposedHelpers.callMethod(XposedHelpers.callStaticMethod(XposedHelpers.findClass("nsj", cl), "b"), "f")
+        XposedHelpers.callMethod(shown, "a") as? ComponentName
+    }.getOrNull()
+
     private fun hookRecents() {
         recentsButton()
         recentsScreen()
         closeReceiver()
         keepClosedMusicAppsClosed()
         log("recents: button, screen and close receiver hooked")
+    }
+
+    // The recents screen while it is resumed on the car display, and the screen it covered when it opened, so a
+    // second tap on the recents button puts that screen back instead of opening the same screen again
+    @Volatile private var shownRecents: Any? = null
+    @Volatile private var screenBeforeRecents: ComponentName? = null
+
+    // Tapping the recents button opens the recents screen; tapping it again closes that screen and returns to what
+    // was showing before, instead of bringing the same screen forward again
+    private fun recentsTap() {
+        val screen = shownRecents
+        if (screen != null) {
+            shownRecents = null
+            val back = screenBeforeRecents ?: ComponentName(GEARHEAD, APP_LAUNCHER)
+            screenBeforeRecents = null
+            safely("recents") { leaveRecents(screen, back) }
+            return
+        }
+        screenBeforeRecents = showingApp() ?: ComponentName(GEARHEAD, APP_LAUNCHER)
+        startCarApp(ComponentName(GEARHEAD, RECENTS_HOST), Intent().putExtra(EXTRA_RECENTS, true))
     }
 
     // The rail fragment (onn, 17.6 njv) keeps the apps button (launcher_and_dashboard_icon), or next to phone apps the
@@ -1223,7 +1249,7 @@ class Entry : IXposedHookLoadPackage {
                 setBackgroundResource(ripple.resourceId)
             }
             contentDescription = module.getString(R.string.recents_title)
-            setOnClickListener { startCarApp(ComponentName(GEARHEAD, RECENTS_HOST), Intent().putExtra(EXTRA_RECENTS, true)) }
+            setOnClickListener { recentsTap() }
         }
         val index = host.indexOfChild(interceptor)
         val params = interceptor.layoutParams
@@ -1259,9 +1285,22 @@ class Entry : IXposedHookLoadPackage {
                 }
             }
         })
+        // The recents screen is over once it pauses or is destroyed (an app opened from it, the back gesture, or a
+        // second tap), so the next tap on the recents button opens it fresh
+        val over = object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.thisObject === shownRecents) {
+                    shownRecents = null
+                    screenBeforeRecents = null
+                }
+            }
+        }
+        XposedHelpers.findAndHookMethod("rvk", cl, "L", over)
+        XposedHelpers.findAndHookMethod("rvk", cl, "J", over)
     }
 
     private fun showRecents(screen: Any) {
+        shownRecents = screen
         val context = screen as Context
         val view = RecentsScreen(
             context, moduleContext(context), openApps.keys.toList(),
@@ -1291,6 +1330,10 @@ class Entry : IXposedHookLoadPackage {
 
     // Opens the app, then finishes the recents screen (rua.di, what ssg.a logs as finish) so the next time it opens fresh
     private fun leaveRecents(screen: Any, app: ComponentName) {
+        if (screen === shownRecents) {
+            shownRecents = null
+            screenBeforeRecents = null
+        }
         startCarApp(app)
         XposedHelpers.callMethod(screen, "di")
     }
@@ -1300,6 +1343,8 @@ class Entry : IXposedHookLoadPackage {
     // apps their own), so those are stopped for them; music is also paused.
     private fun closeApp(context: Context, app: ComponentName) {
         val category = openApps.remove(app)
+        // The screen the recents button would go back to is gone, so a second tap falls back to the launcher
+        if (app == screenBeforeRecents) screenBeforeRecents = null
         scheduleRailRecents()
         if (app == openNav) {
             openNav = null
