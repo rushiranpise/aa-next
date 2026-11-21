@@ -31,6 +31,7 @@ AA Next keeps that work and continues it.
   <tr><td><img src=".github/icons/local_parking.svg" width="32" alt=""></td><td>Always parked, so typing and full lists stay unlocked while the car moves.</td></tr>
   <tr><td><img src=".github/icons/home.svg" width="32" alt=""></td><td>Start on the app launcher. No navigation, music or autoplay until you open them yourself.</td></tr>
   <tr><td><img src=".github/icons/overview_key.svg" width="32" alt=""></td><td>A recents button to switch between open apps or close them. Closing an app really stops it, music apps included.</td></tr>
+  <tr><td><img src=".github/icons/apps.svg" width="32" alt=""></td><td>Phone apps you open take a taskbar slot too, next to the car's navigation, music and phone shortcuts.</td></tr>
   <tr><td><img src=".github/icons/smartphone.svg" width="32" alt=""></td><td>The car screen on the phone itself, for cars without a screen.</td></tr>
   <tr><td><img src=".github/icons/install_mobile.svg" width="32" alt=""></td><td>Sideloaded car apps, ones with Android Auto support that aren't from the Play Store.</td></tr>
   <tr><td><img src=".github/icons/speed.svg" width="32" alt=""></td><td>Lighter on older phones, with a lower frame rate and a cap on the car screen resolution.</td></tr>
@@ -43,7 +44,7 @@ AA Next keeps that work and continues it.
 
 ## Getting it
 
-You'll need a rooted phone with LSPosed or Vector, and Android Auto 17.6. AA Next hooks Android Auto's
+You'll need a rooted phone with LSPosed or Vector, and Android Auto 18.2. AA Next hooks Android Auto's
 internal code, which changes with every version.
 
 AA Next has its own package name, so Android treats it as a separate app. Disable the old AA Mods module in

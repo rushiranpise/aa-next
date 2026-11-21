@@ -16,6 +16,8 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Parcel
 import android.util.Log
 import android.util.TypedValue
@@ -104,10 +106,13 @@ class Entry : IXposedHookLoadPackage {
         if (scale != 100) safely("phone app size") { hookPhoneAppDensity(scale) } else Status.off("phone app size")
         val pinned = prefs.getString(Prefs.PINNED_APPS, "").orEmpty().split(',').filter { it.isNotEmpty() }
         if (pinned.isNotEmpty()) safely("pinned apps") { hookPinnedApps(pinned) } else Status.off("pinned apps")
-        if (onlyOpenApps()) safely("open apps") {
+        // Phone apps need the same open-app tracking as recents even when the recents button is off: the rail's
+        // own recents slot is what makes an opened phone app show in the taskbar next to the native car apps
+        if (onlyOpenApps() || Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) safely("open apps") {
             trackOpenApps()
-            dashboardShowsOnlyOpenApps()
+            if (onlyOpenApps()) dashboardShowsOnlyOpenApps()
         } else Status.off("open apps")
+        if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) safely("phone app taskbar") { railShowsPhoneApps() } else Status.off("phone app taskbar")
         if (Prefs.on(prefs, Prefs.START_ON_LAUNCHER)) safely("start on launcher") { hookStartOnLauncher() } else Status.off("start on launcher")
         if (Prefs.on(prefs, Prefs.RECENTS)) safely("recents") { hookRecents() } else Status.off("recents")
         if (Prefs.on(prefs, Prefs.LIGHTER)) safely("frame rate") { hookFrameRate() } else Status.off("frame rate")
@@ -991,7 +996,7 @@ class Entry : IXposedHookLoadPackage {
         openApps.remove(component)
         openApps[component] = category
         reconnectMusicApp(component.packageName)
-        refreshRail()
+        scheduleRailRecents()
     }
 
     // The category is an enum whose constants are renamed with the build, but its public int field h is the id that
@@ -1054,8 +1059,7 @@ class Entry : IXposedHookLoadPackage {
         recentsScreen()
         closeReceiver()
         keepClosedMusicAppsClosed()
-        railShowsOpenApps()
-        log("recents: button, screen, close receiver and rail hooked")
+        log("recents: button, screen and close receiver hooked")
     }
 
     // The rail fragment (onn, 17.6 njv) keeps the apps button (launcher_and_dashboard_icon), or next to phone apps the
@@ -1083,47 +1087,72 @@ class Entry : IXposedHookLoadPackage {
         })
     }
 
-    // The rail's app shortcuts show the open apps, newest first, instead of Android Auto's picks (its navigation, music
-    // and phone apps and a recent one). onn.m binds each slot; ona.m builds the item for any app, phone apps included,
-    // whose tap starts it the usual way, and an empty item (dro.s) hides the slot. (17.6: njv.m, nkf.k, kfn.h.)
+    // The taskbar's shortcuts are Android Auto's navigation, media and phone defaults plus its recent apps, so a
+    // phone app starts showing there once it is one of those recents. onn is the rail fragment and onn.c the model
+    // (ona); its u lazy creates the recents model (omz), whose u method filters the defaults and denied apps, keeps
+    // the newest three and writes them to RailHotseat_Recent_Apps_Key. Android Auto later drops anything that isn't a
+    // car app when it loads that key again, so the rail's item builder (omt.invoke) gets the open phone apps added
+    // to its own list instead: each of the three recent slots is built there (ona.l), and the navigation, media and
+    // phone shortcuts keep their own slots untouched.
     @Volatile private var rail: Any? = null
+    private val railRecents = java.util.Collections.synchronizedSet(LinkedHashSet<ComponentName>())
+    // Created on first use: the class is constructed in zygote, before this process has a main looper to attach to
+    private val railHandler by lazy { Handler(Looper.getMainLooper()) }
 
-    private fun railShowsOpenApps() {
+    private fun railShowsPhoneApps() {
         XposedHelpers.findAndHookMethod("onn", cl, "onViewCreated", View::class.java, Bundle::class.java, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 rail = param.thisObject
+                // Apps opened before the rail's view (a notification, a phone app started on connect) are merged too
+                scheduleRailRecents()
             }
         })
-        XposedHelpers.findAndHookMethod("onn", cl, "m", RAIL_SLOT, "oqk", object : XC_MethodHook() {
+        // The rail builds its three recent items from the list at args[2]; the defaults already have their own slots,
+        // so only plain phone apps are added, newest first, and Android Auto still builds and draws the item itself.
+        XposedHelpers.findAndHookMethod("omt", cl, "invoke", Any::class.java, Any::class.java, Any::class.java, Any::class.java, Any::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                val view = param.args[0] as View
-                val slot = if (view.id == View.NO_ID) -1 else RAIL_SLOTS.indexOf(view.resources.getResourceEntryName(view.id))
-                if (slot >= 0) railItem(slot)?.let { param.args[1] = it }
+                val native = (param.args[2] as? List<*>)?.filterIsInstance<ComponentName>().orEmpty()
+                val defaults = railDefaults(param.thisObject)
+                val ours = synchronized(openApps) {
+                    openApps.entries.filter { it.value == "APP" && it.key !in defaults }.map { it.key }.asReversed()
+                }
+                if (ours.isEmpty()) return
+                val merged = LinkedHashSet<ComponentName>(ours.size + native.size)
+                merged.addAll(ours)
+                merged.addAll(native)
+                param.args[2] = merged.toList()
             }
         })
+        log("taskbar: opened phone apps join the rail's recent apps")
     }
 
-    private fun railItem(slot: Int): Any? {
-        val model = rail?.let { XposedHelpers.getObjectField(it, "c") } ?: return null
-        val app = synchronized(openApps) { openApps.keys.toList() }.asReversed().getOrNull(slot)
-            ?: return XposedHelpers.callStaticMethod(XposedHelpers.findClass("dro", cl), "s")
-        val recent = runCatching {
-            XposedHelpers.findClass("omw", cl).enumConstants?.firstOrNull { (it as? Enum<*>)?.name == "RECENT" }
-        }.getOrNull() ?: XposedHelpers.getStaticObjectField(XposedHelpers.findClass("omw", cl), "f") // RECENT
-        return XposedHelpers.callMethod(model, "m", app, recent, false, false, false)
+    // The apps Android Auto keeps in fixed taskbar slots, read from the rail's recents model (omz fields a/h/i)
+    private fun railDefaults(railItem: Any): Set<ComponentName> = runCatching {
+        val model = XposedHelpers.getObjectField(railItem, "a")
+        val recents = XposedHelpers.callMethod(XposedHelpers.getObjectField(model, "u"), "a")
+        listOf("a", "h", "i").mapNotNull { XposedHelpers.getObjectField(recents, it) as? ComponentName }.toSet()
+    }.getOrDefault(emptySet())
+
+    // Runs on the main thread because updating the rail's state holders there is what Android Auto does itself
+    private fun scheduleRailRecents() {
+        if (rail == null) return
+        railHandler.post { safely("rail recents") { syncRailRecents() } }
     }
 
-    // Binds all four slots again (fitShortcuts makes room for them, rather than Android Auto's two to four by height)
-    private fun refreshRail() {
+    // Open phone apps, newest first, then the rail's own recents. Apps added here before but closed since are
+    // removed; the recents Android Auto put there itself are kept. The model filters the taskbar's own defaults.
+    private fun syncRailRecents() {
         val fragment = rail ?: return
-        val slots = listOf("H", "I", "J", "K").map { XposedHelpers.getObjectField(fragment, it) as View? }
-        val first = slots.firstOrNull() ?: return
-        first.post {
-            safely("rail apps") {
-                slots.forEachIndexed { slot, view ->
-                    if (view != null) XposedHelpers.callStaticMethod(fragment.javaClass, "m", view, railItem(slot) ?: return@forEachIndexed)
-                }
-            }
+        val model = XposedHelpers.getObjectField(fragment, "c") ?: return
+        val lazy = XposedHelpers.getObjectField(model, "u") ?: return
+        val recents = XposedHelpers.callMethod(lazy, "a") ?: return
+        val ours = synchronized(openApps) { openApps.entries.filter { it.value == "APP" }.map { it.key }.asReversed() }
+        val current = (XposedHelpers.callMethod(recents, "e") as? List<*>)?.filterIsInstance<ComponentName>().orEmpty()
+        synchronized(railRecents) {
+            val merged = ours + current.filter { it !in railRecents && it !in ours }
+            railRecents.clear()
+            railRecents.addAll(ours)
+            XposedHelpers.callMethod(recents, "u", merged)
         }
     }
 
@@ -1268,7 +1297,7 @@ class Entry : IXposedHookLoadPackage {
     // apps their own), so those are stopped for them; music is also paused.
     private fun closeApp(context: Context, app: ComponentName) {
         val category = openApps.remove(app)
-        refreshRail()
+        scheduleRailRecents()
         if (app == openNav) {
             openNav = null
             navRegion = null
@@ -1935,8 +1964,6 @@ class Entry : IXposedHookLoadPackage {
         // Logged by the class that applies the frame rate (jkv in 18.2), and the cap AA Next puts on it
         const val FRAME_RATE_LOG = "setFrameRateRestriction(%s)"
         const val FRAME_RATE_CAP = 30
-        const val RAIL_SLOT = "com.google.android.apps.auto.components.system.facetbar.hotseat.RailHotseatItemView"
-        val RAIL_SLOTS = listOf("hotseat_one", "hotseat_two", "hotseat_three", "hotseat_four")
         const val EXTRA_FOR_DASHBOARD = "com.google.android.apps.auto.components.system.dashboard.EXTRA_FOR_DASHBOARD"
         const val APP_LAUNCHER = "com.google.android.projection.gearhead.system.applauncher.GhAppLauncherService"
         const val CAR_REGION_ID = "com.google.android.gms.car.display.CarRegionId"
