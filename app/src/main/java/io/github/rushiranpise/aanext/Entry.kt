@@ -107,8 +107,9 @@ class Entry : IXposedHookLoadPackage {
         val pinned = prefs.getString(Prefs.PINNED_APPS, "").orEmpty().split(',').filter { it.isNotEmpty() }
         if (pinned.isNotEmpty()) safely("pinned apps") { hookPinnedApps(pinned) } else Status.off("pinned apps")
         // Phone apps need the same open-app tracking as recents even when the recents button is off: the rail's
-        // own recents slot is what makes an opened phone app show in the taskbar next to the native car apps
-        if (onlyOpenApps() || Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) safely("open apps") {
+        // own recents slot is what makes an opened phone app show in the taskbar next to the native car apps.
+        // Recents needs that tracking for its own list too, but on its own it leaves Android Auto's layout alone
+        if (onlyOpenApps() || Prefs.on(prefs, Prefs.RECENTS) || Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) safely("open apps") {
             trackOpenApps()
             if (onlyOpenApps()) dashboardShowsOnlyOpenApps()
         } else Status.off("open apps")
@@ -280,9 +281,9 @@ class Entry : IXposedHookLoadPackage {
         // Google's hidden "Phone Apps" launcher tab (codename Cradle), which runs phone apps natively on the car
         // screen. Its package filter is replaced in hookFlags, since the default only lets through a few games
         if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) map["CradleFeature__all_app_launcher_enabled"] = "true"
-        // Showing only the open apps needs the canonical layout, where an app on its own fills the screen and the
-        // dashboard (map + cards) only shows on demand. Wide screens otherwise get the widescreen layout, whose app area
-        // always stops at the dashboard column. Android Auto picks widescreen from this width (1240dp by default) up.
+        // Start on launcher needs the canonical layout, where an app on its own fills the screen and the dashboard
+        // (map + cards) only shows on demand. Wide screens otherwise get the widescreen layout, whose app area always
+        // stops at the dashboard column. Android Auto picks widescreen from this width (1240dp by default) up.
         if (onlyOpenApps()) map["SystemUi__widescreen_breakpoint_dp"] = "1000000"
         // The user's own overrides come last so they win over the presets
         prefs.getString(Prefs.FLAGS, "").orEmpty().lineSequence()
@@ -944,8 +945,10 @@ class Entry : IXposedHookLoadPackage {
         Status.installed("resolution", resolution)
     }
 
-    // Start on launcher and recents both show only the apps the user opened
-    private fun onlyOpenApps() = Prefs.on(prefs, Prefs.START_ON_LAUNCHER) || Prefs.on(prefs, Prefs.RECENTS)
+    // Start on launcher alone shows only the apps the user opened. Recents must not turn this on: the canonical
+    // layout it needs replaces the rail's 9-dot app drawer button with the dashboard icon, while the recents button
+    // is meant to sit beside that 9-dot button, not take its place
+    private fun onlyOpenApps() = Prefs.on(prefs, Prefs.START_ON_LAUNCHER)
 
     // The navigation app on the car screen, the music app the user opened, and every app opened this drive with its
     // category, newest last. An app stays open after you switch away (music keeps playing) until it's closed. All of

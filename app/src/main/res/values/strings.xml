@@ -42,7 +42,7 @@
     <string name="start_on_launcher">Open the app launcher first</string>
     <string name="start_on_launcher_summary">Android Auto opens the app launcher without starting navigation or music. Choose what to open.</string>
     <string name="recents">Recent apps button</string>
-    <string name="recents_summary">Adds a button above the apps button to show, switch between, or close open apps.</string>
+    <string name="recents_summary">Adds a button next to the apps button to show, switch between, or close open apps.</string>
     <string name="recents_title">Open apps</string>
     <string name="recents_close_all">Close all</string>
     <string name="recents_close">Close</string>
