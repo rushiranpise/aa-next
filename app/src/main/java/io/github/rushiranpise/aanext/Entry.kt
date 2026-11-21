@@ -98,9 +98,11 @@ class Entry : IXposedHookLoadPackage {
         if (Prefs.on(prefs, Prefs.ANY_APP_LAUNCHER)) {
             safely("launcher tabs") { hookLauncherTabs() }
             safely("phone app rail") { keepRailBesidePhoneApps() }
+            safely("media app launches") { hookMediaAppLaunches() }
         } else {
             Status.off("launcher tabs")
             Status.off("phone app rail")
+            Status.off("media app launches")
         }
         val scale = prefs.getInt(Prefs.PHONE_APP_SCALE, 100)
         if (scale != 100) safely("phone app size") { hookPhoneAppDensity(scale) } else Status.off("phone app size")
@@ -1704,6 +1706,61 @@ class Entry : IXposedHookLoadPackage {
         log("launcher tabs: Entertainment dropped, Phone Apps kept, car tab left alone")
     }
 
+    // A phone app opened from the taskbar keeps its phone activity. Android Auto's media interceptor (mpg) rewrites
+    // the launch to the media host only when its registry calls the target a media app; for Spotify the registry can
+    // resolve to the legacy MediaBrowserService instead of the Car App Library service, and the phone activity wins.
+    // Resolve the package's Car App Library MEDIA service from PackageManager and make the interceptor use it, so
+    // Spotify opens its car UI while YouTube, which has no CarAppService, keeps its normal launch.
+    private fun hookMediaAppLaunches() {
+        val rue = XposedHelpers.findClass("rue", cl)
+        // Let the media processor handle the phone activity the shortcut starts with.
+        XposedHelpers.findAndHookMethod("mpg", cl, "k", Intent::class.java, rue, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val intent = param.args[0] as? Intent ?: return
+                if (mediaLaunch(intent) != null) param.result = true
+            }
+        })
+        // mpg.d stores intent.component in GH.ComponentExtra and starts the media host, so give it the CarAppService
+        // instead of the phone activity, and drop AppKey so nth.d falls back to that component.
+        XposedHelpers.findAndHookMethod("mpg", cl, "d", Intent::class.java, rue, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val intent = param.args[0] as? Intent ?: return
+                val media = mediaLaunch(intent) ?: return
+                if (media != intent.component) {
+                    intent.component = media
+                    intent.removeExtra("AppKey")
+                }
+            }
+        })
+        log("media app launches: taskbar shortcuts open the package's car media service")
+    }
+
+    // Only a bare app launch is the taskbar/phone-app path; playback actions and deep links stay as they are.
+    private fun mediaLaunch(intent: Intent): ComponentName? {
+        if (intent.action != null || intent.data != null) return null
+        val target = intent.component ?: return null
+        if (target.packageName == GEARHEAD || target.className in NOT_APPS) return null
+        return mediaCarApp(target)
+    }
+
+    // The service Android Auto itself launches for a Car App Library media app, found from the app's manifest rather
+    // than from Android Auto's registry, which also lists legacy MediaBrowserServices for the same package.
+    private fun mediaCarApp(target: ComponentName): ComponentName? = runCatching {
+        val context = AndroidAppHelper.currentApplication() ?: return@runCatching null
+        val query = Intent("androidx.car.app.CarAppService")
+            .setPackage(target.packageName)
+            .addCategory("androidx.car.app.category.MEDIA")
+        val media = context.packageManager.queryIntentServices(query, 0).mapNotNull { info ->
+            val service = info.serviceInfo ?: return@mapNotNull null
+            ComponentName(service.packageName, service.name)
+        }
+        if (media.isEmpty()) return@runCatching null
+        media.firstOrNull { it == target } ?: media.first()
+    }.getOrElse {
+        log("media app lookup failed: ${target.flattenToString()}: $it")
+        null
+    }
+
     // umz.a is the tab-selected callback. The Phone Apps tab is given the Entertainment content id in the template,
     // but the host can still report the id it cached for that tab; translate it back so nts builds the injected h
     // list instead of the native phone-apps request, which ends projection. (17.6: different lambda class.)
@@ -2012,6 +2069,8 @@ class Entry : IXposedHookLoadPackage {
         // Logged by the class that applies the frame rate (jkv in 18.2), and the cap AA Next puts on it
         const val FRAME_RATE_LOG = "setFrameRateRestriction(%s)"
         const val FRAME_RATE_CAP = 30
+        // ntf.h: 1 navigation, 3 media, the category ids the app registry and the rail compare
+        const val MEDIA_CATEGORY = 3
         const val EXTRA_FOR_DASHBOARD = "com.google.android.apps.auto.components.system.dashboard.EXTRA_FOR_DASHBOARD"
         const val APP_LAUNCHER = "com.google.android.projection.gearhead.system.applauncher.GhAppLauncherService"
         const val CAR_REGION_ID = "com.google.android.gms.car.display.CarRegionId"
